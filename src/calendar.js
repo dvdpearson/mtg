@@ -120,25 +120,21 @@ function getNewToken() {
   });
 }
 
-// Get date range from now until end of next week
+// Get date range from now until 3 weeks from now
 function getWeekDateRange() {
   const now = new Date();
 
-  const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
-  startOfWeek.setHours(0, 0, 0, 0);
-
-  const endOfNextWeek = new Date(startOfWeek);
-  endOfNextWeek.setDate(startOfWeek.getDate() + 13);
-  endOfNextWeek.setHours(23, 59, 59, 999);
+  const threeWeeksFromNow = new Date(now);
+  threeWeeksFromNow.setDate(now.getDate() + 21);
+  threeWeeksFromNow.setHours(23, 59, 59, 999);
 
   return {
     timeMin: now.toISOString(),
-    timeMax: endOfNextWeek.toISOString()
+    timeMax: threeWeeksFromNow.toISOString()
   };
 }
 
-// Get meetings for this week and next week
+// Get meetings for the next 3 weeks
 export async function getThisWeeksMeetings(calendar) {
   const { timeMin, timeMax } = getWeekDateRange();
 
