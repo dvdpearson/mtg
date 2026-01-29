@@ -362,12 +362,14 @@ async function setupCommand() {
 
   console.log(chalk.yellow('Setting up Google Calendar OAuth credentials...\n'));
   console.log(chalk.gray('Follow these steps:\n'));
-  console.log(chalk.gray('1. Go to https://console.cloud.google.com/'));
+  console.log(chalk.gray('1. Go to ') + chalk.cyan('https://console.cloud.google.com/'));
   console.log(chalk.gray('2. Create/select a project'));
-  console.log(chalk.gray('3. Enable Google Calendar API'));
-  console.log(chalk.gray('4. Create OAuth 2.0 credentials (Desktop app)'));
-  console.log(chalk.gray('5. Add redirect URI: ') + chalk.cyan('http://localhost:3000'));
-  console.log(chalk.gray('6. Download the JSON file\n'));
+  console.log(chalk.gray('3. Enable ') + chalk.white('Google Calendar API'));
+  console.log(chalk.gray('4. Go to ') + chalk.cyan('APIs & Services > Credentials'));
+  console.log(chalk.gray('5. Create Credentials > OAuth 2.0 Client ID'));
+  console.log(chalk.gray('6. Choose ') + chalk.white('Web application') + chalk.gray(' (NOT Desktop app)'));
+  console.log(chalk.gray('7. Under "Authorized redirect URIs", add: ') + chalk.cyan('http://localhost:3000'));
+  console.log(chalk.gray('8. Click Create and download the JSON file\n'));
 
   const answers = await inquirer.prompt([
     {
