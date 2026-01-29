@@ -50,9 +50,12 @@ This will guide you through:
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select an existing one
 3. Enable the **Google Calendar API**
-4. Create **OAuth 2.0 credentials** (choose "Desktop app")
-5. Download the credentials JSON file
-6. Run `mtg setup` and provide the path to the file
+4. Go to **APIs & Services > Credentials**
+5. Create Credentials > **OAuth 2.0 Client ID**
+6. Choose **"Web application"** (NOT Desktop app)
+7. Under "Authorized redirect URIs", add: `http://localhost:3000`
+8. Click Create and download the credentials JSON file
+9. Run `mtg setup` and provide the path to the file
 
 ## Usage
 

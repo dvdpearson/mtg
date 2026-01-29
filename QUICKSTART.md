@@ -23,8 +23,11 @@ curl -fsSL https://raw.githubusercontent.com/dvdpearson/mtg/main/install.sh | ba
 1. Visit [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project (or use existing)
 3. Enable **Google Calendar API**
-4. Create **OAuth 2.0 Client ID** (Desktop app type)
-5. Download credentials JSON file
+4. Go to **APIs & Services > Credentials**
+5. Create Credentials > **OAuth 2.0 Client ID**
+6. Choose **"Web application"** (NOT Desktop app)
+7. Under "Authorized redirect URIs", add: `http://localhost:3000`
+8. Click Create and download credentials JSON file
 
 ### Step 3: Setup
 

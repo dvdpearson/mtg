@@ -34,8 +34,9 @@ npm install
 4. Create OAuth 2.0 credentials:
    - Go to "APIs & Services" > "Credentials"
    - Click "Create Credentials" > "OAuth client ID"
-   - Choose **"Desktop app"** as the application type
+   - Choose **"Web application"** as the application type (NOT Desktop app)
    - Name it: "Meeting Room Assistant CLI"
+   - Under "Authorized redirect URIs", add: `http://localhost:3000`
    - Click "Create"
 
 5. Download the credentials:
