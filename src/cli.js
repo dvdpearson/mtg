@@ -401,7 +401,7 @@ async function setupCommand() {
 }
 
 // Version
-const packageJson = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url)));
+const packageJson = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url)));
 
 // CLI setup
 program
