@@ -4,6 +4,7 @@ import { URL } from 'url';
 import fs from 'fs';
 import chalk from 'chalk';
 import ora from 'ora';
+import { exec } from 'child_process';
 import { getCredentialsPath, getTokenPath, loadConfig } from './config.js';
 
 let oauth2Client;
@@ -100,7 +101,6 @@ function getNewToken() {
 
       // Try to open the browser
       const open = (url) => {
-        const { exec } = require('child_process');
         const command = process.platform === 'darwin' ? 'open' :
                        process.platform === 'win32' ? 'start' : 'xdg-open';
         exec(`${command} "${url}"`);
