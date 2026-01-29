@@ -2,9 +2,9 @@
   "name": "meeting-room-assistant",
   "version": "1.0.0",
   "description": "CLI tool to automatically add meeting rooms to Google Calendar events",
-  "main": "cli.js",
+  "main": "src/cli.js",
   "bin": {
-    "mtg": "./cli.js"
+    "mtg": "./src/cli.js"
   },
   "repository": {
     "type": "git",
