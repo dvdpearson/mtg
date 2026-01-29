@@ -28,6 +28,7 @@ import {
   getThisWeeksMeetings,
   filterMeetingsWithoutRooms,
   findAvailableRoom,
+  findAllAvailableRooms,
   addRoomToMeeting,
   formatDateTime,
   getAttendeeCount
@@ -63,29 +64,48 @@ function showWelcome() {
 }
 
 // Process selected meetings
-async function processSelectedMeetings(calendar, meetings, availableRooms, selectedIndices) {
+async function processSelectedMeetings(calendar, meetings, allAvailableRooms, selectedIndices) {
   let added = 0;
   let skipped = 0;
   let failed = 0;
 
   for (const index of selectedIndices) {
     const meeting = meetings[index];
-    const room = availableRooms[index];
+    const rooms = allAvailableRooms[index];
 
-    if (!room) {
+    if (!rooms || rooms.length === 0) {
       console.log(chalk.red(`\n✗ ${meeting.summary} - No room available`));
       skipped++;
       continue;
     }
 
+    let selectedRoom = rooms[0];
+
+    // If multiple rooms available, let user choose
+    if (rooms.length > 1) {
+      console.log('');
+      const roomAnswer = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'room',
+          message: chalk.cyan(`Choose a room for "${meeting.summary}":`),
+          choices: rooms.map(room => ({
+            name: `${room.name} ${chalk.gray(`(capacity: ${room.capacity})`)}`,
+            value: room
+          }))
+        }
+      ]);
+      selectedRoom = roomAnswer.room;
+    }
+
     const spinner = ora({
-      text: chalk.gray(`Adding ${room.name} to "${meeting.summary}"...`),
+      text: chalk.gray(`Adding ${selectedRoom.name} to "${meeting.summary}"...`),
       spinner: 'dots'
     }).start();
 
     try {
-      await addRoomToMeeting(calendar, meeting.id, room.email);
-      spinner.succeed(chalk.green(`${room.name} added to "${meeting.summary}"`));
+      await addRoomToMeeting(calendar, meeting.id, selectedRoom.email);
+      spinner.succeed(chalk.green(`${selectedRoom.name} added to "${meeting.summary}"`));
       added++;
     } catch (error) {
       spinner.fail(chalk.red(`Failed to add room to "${meeting.summary}": ${error.message}`));
@@ -150,13 +170,13 @@ async function runCommand() {
 
     spinner.text = chalk.gray('Checking room availability...');
 
-    const availableRooms = [];
+    const allAvailableRooms = [];
     for (const meeting of meetingsWithoutRooms) {
       try {
-        const room = await findAvailableRoom(calendar, meeting);
-        availableRooms.push(room);
+        const rooms = await findAllAvailableRooms(calendar, meeting);
+        allAvailableRooms.push(rooms);
       } catch (error) {
-        availableRooms.push(null);
+        allAvailableRooms.push([]);
       }
     }
 
@@ -201,15 +221,23 @@ async function runCommand() {
       choices.push(new inquirer.Separator(dayLabel));
 
       group.forEach(({ meeting, index, date }) => {
-        const room = availableRooms[index];
+        const rooms = allAvailableRooms[index];
         const name = meeting.summary || 'Untitled Meeting';
         const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-        const roomInfo = room ? chalk.green(`→ ${room.name}`) : chalk.red('(no room available)');
+
+        let roomInfo;
+        if (!rooms || rooms.length === 0) {
+          roomInfo = chalk.red('(no room available)');
+        } else if (rooms.length === 1) {
+          roomInfo = chalk.green(`→ ${rooms[0].name}`);
+        } else {
+          roomInfo = chalk.green(`→ ${rooms[0].name}`) + chalk.gray(` (+${rooms.length - 1} more)`);
+        }
 
         choices.push({
           name: `  ${name} ${chalk.gray(`(${time})`)} ${roomInfo}`,
           value: index,
-          disabled: !room
+          disabled: !rooms || rooms.length === 0
         });
       });
     });
@@ -245,7 +273,7 @@ async function runCommand() {
     const { added, skipped, failed } = await processSelectedMeetings(
       calendar,
       meetingsWithoutRooms,
-      availableRooms,
+      allAvailableRooms,
       answers.meetings
     );
 

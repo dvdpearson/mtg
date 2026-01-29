@@ -207,8 +207,8 @@ export function getAttendeeCount(meeting) {
   return meeting.attendees.filter(attendee => !attendee.resource).length;
 }
 
-// Find available room
-export async function findAvailableRoom(calendar, meeting) {
+// Find all available rooms for a meeting
+export async function findAllAvailableRooms(calendar, meeting) {
   const config = loadConfig();
   const ROOMS = config.rooms || [];
 
@@ -237,23 +237,25 @@ export async function findAvailableRoom(calendar, meeting) {
     const hasCapacity = room.capacity >= attendeeCount;
 
     return isAvailable && hasCapacity;
-  });
+  }).sort((a, b) => a.capacity - b.capacity);
 
   if (availableRooms.length === 0) {
     const anyAvailable = ROOMS.filter(room => {
       const roomAvailability = availability[room.email];
       if (!roomAvailability) return false;
       return !roomAvailability.busy || roomAvailability.busy.length === 0;
-    });
+    }).sort((a, b) => a.capacity - b.capacity);
 
-    if (anyAvailable.length === 0) {
-      return null;
-    }
-
-    return anyAvailable.sort((a, b) => a.capacity - b.capacity)[0];
+    return anyAvailable;
   }
 
-  return availableRooms.sort((a, b) => a.capacity - b.capacity)[0];
+  return availableRooms;
+}
+
+// Find available room (returns first available)
+export async function findAvailableRoom(calendar, meeting) {
+  const rooms = await findAllAvailableRooms(calendar, meeting);
+  return rooms.length > 0 ? rooms[0] : null;
 }
 
 // Add room to meeting
