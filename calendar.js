@@ -42,38 +42,82 @@ export async function authorize() {
 }
 
 // Get new token through OAuth flow
-async function getNewToken() {
-  const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/calendar'],
-    redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
+function getNewToken() {
+  return new Promise((resolve, reject) => {
+    const PORT = 3000;
+
+    console.log(chalk.cyan.bold('\n🔐 Authorization Required\n'));
+    console.log(chalk.yellow('Starting local server on port ' + PORT + '...\n'));
+
+    const server = http.createServer(async (req, res) => {
+      try {
+        if (req.url.startsWith('/?code=') || req.url.startsWith('/?')) {
+          const url = new URL(req.url, `http://localhost:${PORT}`);
+          const code = url.searchParams.get('code');
+          const error = url.searchParams.get('error');
+
+          if (error) {
+            res.writeHead(400, { 'Content-Type': 'text/html' });
+            res.end('<html><body><h1>Authentication failed</h1><p>Error: ' + error + '</p></body></html>');
+            server.close();
+            reject(new Error('Authentication failed: ' + error));
+            return;
+          }
+
+          if (code) {
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end('<html><body><h1>✓ Authentication successful!</h1><p>You can close this window and return to the terminal.</p></body></html>');
+            server.close();
+
+            const { tokens } = await oauth2Client.getToken(code);
+            oauth2Client.setCredentials(tokens);
+            fs.writeFileSync(getTokenPath(), JSON.stringify(tokens));
+
+            console.log(chalk.green('\n✓ Authentication successful!\n'));
+            resolve(oauth2Client);
+          }
+        }
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'text/html' });
+        res.end('<html><body><h1>Authentication failed</h1></body></html>');
+        server.close();
+        console.log(chalk.red('\n✗ Authentication failed: ' + error.message + '\n'));
+        reject(error);
+      }
+    });
+
+    server.listen(PORT, () => {
+      const authUrl = oauth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: ['https://www.googleapis.com/auth/calendar'],
+        redirect_uri: `http://localhost:${PORT}`
+      });
+
+      console.log(chalk.yellow('Opening browser for authentication...\n'));
+      console.log(chalk.gray('If the browser doesn\'t open, visit this URL:\n'));
+      console.log(chalk.blue.underline(authUrl));
+      console.log('');
+
+      // Try to open the browser
+      const open = (url) => {
+        const { exec } = require('child_process');
+        const command = process.platform === 'darwin' ? 'open' :
+                       process.platform === 'win32' ? 'start' : 'xdg-open';
+        exec(`${command} "${url}"`);
+      };
+
+      open(authUrl);
+    });
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log(chalk.red(`\n✗ Port ${PORT} is already in use. Please close other applications using this port.\n`));
+      } else {
+        console.log(chalk.red('\n✗ Server error: ' + err.message + '\n'));
+      }
+      reject(err);
+    });
   });
-
-  console.log(chalk.cyan.bold('\n🔐 Authorization Required\n'));
-  console.log(chalk.yellow('Please visit this URL to authorize:\n'));
-  console.log(chalk.blue.underline(authUrl));
-  console.log('');
-
-  const inquirer = (await import('inquirer')).default;
-  const { code } = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'code',
-      message: 'Enter the authorization code from the browser:'
-    }
-  ]);
-
-  try {
-    const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
-    fs.writeFileSync(getTokenPath(), JSON.stringify(tokens));
-
-    console.log(chalk.green('\n✓ Authentication successful!\n'));
-    return oauth2Client;
-  } catch (error) {
-    console.log(chalk.red('\n✗ Authentication failed: ' + error.message + '\n'));
-    process.exit(1);
-  }
 }
 
 // Get date range from now until end of next week

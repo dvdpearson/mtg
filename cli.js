@@ -366,7 +366,8 @@ async function setupCommand() {
   console.log(chalk.gray('2. Create/select a project'));
   console.log(chalk.gray('3. Enable Google Calendar API'));
   console.log(chalk.gray('4. Create OAuth 2.0 credentials (Desktop app)'));
-  console.log(chalk.gray('5. Download the JSON file\n'));
+  console.log(chalk.gray('5. Add redirect URI: ') + chalk.cyan('http://localhost:3000'));
+  console.log(chalk.gray('6. Download the JSON file\n'));
 
   const answers = await inquirer.prompt([
     {
