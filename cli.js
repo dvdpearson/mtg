@@ -33,8 +33,17 @@ import {
   getAttendeeCount
 } from './calendar.js';
 import fs from 'fs';
+import os from 'os';
 
 const program = new Command();
+
+// Helper function to expand tilde in paths
+function expandTilde(filepath) {
+  if (filepath.startsWith('~/')) {
+    return filepath.replace('~', os.homedir());
+  }
+  return filepath;
+}
 
 // Show welcome message
 function showWelcome() {
@@ -366,17 +375,19 @@ async function setupCommand() {
       message: 'Path to your downloaded credentials JSON file:',
       validate: (input) => {
         if (!input) return 'Please provide a path';
-        if (!fs.existsSync(input)) return 'File does not exist';
+        const expandedPath = expandTilde(input);
+        if (!fs.existsSync(expandedPath)) return 'File does not exist';
         return true;
       }
     }
   ]);
 
   try {
-    const content = fs.readFileSync(answers.credentialsPath);
+    const expandedPath = expandTilde(answers.credentialsPath);
+    const content = fs.readFileSync(expandedPath);
     JSON.parse(content); // Validate JSON
 
-    fs.copyFileSync(answers.credentialsPath, getCredentialsPath());
+    fs.copyFileSync(expandedPath, getCredentialsPath());
     console.log(chalk.green('\n✓ Credentials saved successfully!\n'));
     console.log(chalk.gray('Config location: ') + chalk.white(getCredentialsPath()));
     console.log(chalk.yellow('\nRun ') + chalk.cyan('meeting-rooms') + chalk.yellow(' to start using the tool!\n'));
