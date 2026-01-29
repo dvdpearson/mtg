@@ -42,43 +42,38 @@ export async function authorize() {
 }
 
 // Get new token through OAuth flow
-function getNewToken() {
-  return new Promise((resolve, reject) => {
-    const authUrl = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
-      scope: ['https://www.googleapis.com/auth/calendar']
-    });
-
-    console.log(chalk.cyan.bold('\n🔐 Authorization Required\n'));
-    console.log(chalk.yellow('Please visit this URL to authorize:\n'));
-    console.log(chalk.blue.underline(authUrl));
-    console.log('');
-
-    const spinner = ora({
-      text: chalk.gray('Waiting for authentication...'),
-      spinner: 'dots'
-    }).start();
-
-    const server = http.createServer(async (req, res) => {
-      if (req.url.indexOf('/oauth2callback') > -1) {
-        const qs = new URL(req.url, 'http://localhost:3000').searchParams;
-        const code = qs.get('code');
-
-        res.end('Authentication successful! You can close this window and return to the terminal.');
-        server.close();
-
-        const { tokens } = await oauth2Client.getToken(code);
-        oauth2Client.setCredentials(tokens);
-        fs.writeFileSync(getTokenPath(), JSON.stringify(tokens));
-
-        spinner.succeed(chalk.green('Authentication successful!'));
-        console.log('');
-        resolve(oauth2Client);
-      }
-    });
-
-    server.listen(3000);
+async function getNewToken() {
+  const authUrl = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/calendar'],
+    redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
   });
+
+  console.log(chalk.cyan.bold('\n🔐 Authorization Required\n'));
+  console.log(chalk.yellow('Please visit this URL to authorize:\n'));
+  console.log(chalk.blue.underline(authUrl));
+  console.log('');
+
+  const inquirer = (await import('inquirer')).default;
+  const { code } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'code',
+      message: 'Enter the authorization code from the browser:'
+    }
+  ]);
+
+  try {
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+    fs.writeFileSync(getTokenPath(), JSON.stringify(tokens));
+
+    console.log(chalk.green('\n✓ Authentication successful!\n'));
+    return oauth2Client;
+  } catch (error) {
+    console.log(chalk.red('\n✗ Authentication failed: ' + error.message + '\n'));
+    process.exit(1);
+  }
 }
 
 // Get date range from now until end of next week
