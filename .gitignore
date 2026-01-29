@@ -1,0 +1,20 @@
+# Node modules
+node_modules/
+
+# OAuth credentials and tokens
+credentials.json
+token.json
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Build output
+dist/
+*.tgz
+
+# User config
+config.json

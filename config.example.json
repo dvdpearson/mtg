@@ -1,0 +1,27 @@
+{
+  "rooms": [
+    {
+      "name": "Conference Room A",
+      "email": "c_123abc@resource.calendar.google.com",
+      "capacity": 10,
+      "description": "Main conference room on 2nd floor"
+    },
+    {
+      "name": "Small Meeting Room",
+      "email": "c_456def@resource.calendar.google.com",
+      "capacity": 4,
+      "description": "Small room near engineering"
+    },
+    {
+      "name": "Board Room",
+      "email": "c_789ghi@resource.calendar.google.com",
+      "capacity": 20,
+      "description": "Large board room on executive floor"
+    }
+  ],
+  "remoteWorkers": [
+    "john",
+    "jane",
+    "bob"
+  ]
+}
