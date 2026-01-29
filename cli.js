@@ -390,7 +390,7 @@ async function setupCommand() {
     fs.copyFileSync(expandedPath, getCredentialsPath());
     console.log(chalk.green('\n✓ Credentials saved successfully!\n'));
     console.log(chalk.gray('Config location: ') + chalk.white(getCredentialsPath()));
-    console.log(chalk.yellow('\nRun ') + chalk.cyan('meeting-rooms') + chalk.yellow(' to start using the tool!\n'));
+    console.log(chalk.yellow('\nRun ') + chalk.cyan('mtg') + chalk.yellow(' to start using the tool!\n'));
   } catch (error) {
     console.log(chalk.red(`\n✗ Error: ${error.message}\n`));
     process.exit(1);
