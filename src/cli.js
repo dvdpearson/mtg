@@ -69,6 +69,10 @@ async function processSelectedMeetings(calendar, meetings, allAvailableRooms, se
   let skipped = 0;
   let failed = 0;
 
+  // First, collect room choices for all meetings with multiple options
+  const roomSelections = {};
+  const meetingsNeedingChoice = [];
+
   for (const index of selectedIndices) {
     const meeting = meetings[index];
     const rooms = allAvailableRooms[index];
@@ -79,24 +83,53 @@ async function processSelectedMeetings(calendar, meetings, allAvailableRooms, se
       continue;
     }
 
-    let selectedRoom = rooms[0];
-
-    // If multiple rooms available, let user choose
-    if (rooms.length > 1) {
-      console.log('');
-      const roomAnswer = await inquirer.prompt([
-        {
-          type: 'list',
-          name: 'room',
-          message: chalk.cyan(`Choose a room for "${meeting.summary}":`),
-          choices: rooms.map(room => ({
-            name: `${room.name} ${chalk.gray(`(capacity: ${room.capacity})`)}`,
-            value: room
-          }))
-        }
-      ]);
-      selectedRoom = roomAnswer.room;
+    if (rooms.length === 1) {
+      roomSelections[index] = rooms[0];
+    } else {
+      meetingsNeedingChoice.push(index);
     }
+  }
+
+  // If there are meetings with multiple room options, show consolidated prompt
+  if (meetingsNeedingChoice.length > 0) {
+    console.log('');
+    console.log(chalk.cyan.bold('Choose rooms for meetings:\n'));
+
+    const questions = meetingsNeedingChoice.map(index => {
+      const meeting = meetings[index];
+      const rooms = allAvailableRooms[index];
+      const meetingDate = new Date(meeting.start.dateTime || meeting.start.date);
+      const time = meetingDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const date = meetingDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+      return {
+        type: 'list',
+        name: `room_${index}`,
+        message: `${chalk.white(meeting.summary)} ${chalk.gray(`(${date} at ${time})`)}`,
+        choices: rooms.map((room, i) => ({
+          name: `${room.name} ${chalk.gray(`(capacity: ${room.capacity})`)}${i === 0 ? chalk.green(' ← suggested') : ''}`,
+          value: room
+        })),
+        pageSize: 10
+      };
+    });
+
+    const answers = await inquirer.prompt(questions);
+
+    // Store selected rooms
+    Object.keys(answers).forEach(key => {
+      const index = parseInt(key.split('_')[1]);
+      roomSelections[index] = answers[key];
+    });
+  }
+
+  // Now add all rooms
+  console.log('');
+  for (const index of selectedIndices) {
+    if (!roomSelections[index]) continue;
+
+    const meeting = meetings[index];
+    const selectedRoom = roomSelections[index];
 
     const spinner = ora({
       text: chalk.gray(`Adding ${selectedRoom.name} to "${meeting.summary}"...`),
