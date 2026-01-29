@@ -2,12 +2,36 @@
 
 CLI tool to automatically add meeting rooms to Google Calendar events.
 
-## Quick Start
+## Requirements
 
-1. Enable [Google Calendar API](https://console.cloud.google.com/) and download credentials
-2. Install: `npm install -g mtg` or run `./install.sh`
-3. Configure rooms in `config.json`
-4. Run `mtg` to find meetings without rooms and book them
+- Node.js v18 or higher
+- npm
+
+## Installation
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dvdpearson/mtg/main/install.sh | bash
+```
+
+Or install directly with npm:
+```bash
+npm install -g git+https://github.com/dvdpearson/mtg.git
+```
+
+## Setup
+
+After installation, configure Google Calendar API credentials:
+```bash
+mtg setup
+```
+
+## Usage
+
+```bash
+mtg
+```
+
+See full documentation in [CLI-README.md](CLI-README.md)
 
 ## License
 

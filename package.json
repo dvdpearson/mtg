@@ -24,13 +24,7 @@
   },
   "homepage": "https://github.com/dvdpearson/mtg#readme",
   "scripts": {
-    "start": "node cli.js",
-    "build": "npm run build:all",
-    "build:all": "npm run build:macos-x64 && npm run build:macos-arm64 && npm run build:linux-x64 && npm run build:linux-arm64",
-    "build:macos-x64": "pkg . --output ./dist/mtg-macos-x64 --targets node20-macos-x64",
-    "build:macos-arm64": "pkg . --output ./dist/mtg-macos-arm64 --targets node20-macos-arm64",
-    "build:linux-x64": "pkg . --output ./dist/mtg-linux-x64 --targets node20-linux-x64",
-    "build:linux-arm64": "pkg . --output ./dist/mtg-linux-arm64 --targets node20-linux-arm64"
+    "start": "node cli.js"
   },
   "dependencies": {
     "boxen": "^7.1.1",
@@ -41,14 +35,5 @@
     "inquirer": "^9.2.12",
     "ora": "^8.0.1"
   },
-  "devDependencies": {
-    "@yao-pkg/pkg": "^5.16.1"
-  },
-  "type": "module",
-  "pkg": {
-    "assets": [
-      "node_modules/**/*"
-    ],
-    "outputPath": "dist"
-  }
+  "type": "module"
 }
