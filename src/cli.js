@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import boxen from 'boxen';
 import inquirer from 'inquirer';
+import roomPickerPrompt from './room-picker-prompt.js';
 import ora from 'ora';
 import Table from 'cli-table3';
 import { google } from 'googleapis';
@@ -69,49 +70,9 @@ async function processSelectedMeetings(calendar, meetings, selections) {
   let skipped = 0;
   let failed = 0;
 
-  // Group by meeting and check for multi-room options
-  const meetingSelections = {};
   for (const selection of selections) {
-    if (!selection) continue;
-    const { meetingIndex, room, allRooms } = selection;
-    if (!meetingSelections[meetingIndex]) {
-      meetingSelections[meetingIndex] = { room, allRooms };
-    }
-  }
-
-  // For meetings with multiple rooms, let user choose
-  const finalRooms = {};
-  const multiRoomMeetings = Object.entries(meetingSelections).filter(([_, data]) => data.allRooms?.length > 1);
-
-  if (multiRoomMeetings.length > 0) {
-    console.log('');
-    console.log(chalk.cyan('Pick rooms for meetings with multiple options:\n'));
-
-    for (const [meetingIndex, data] of multiRoomMeetings) {
-      const meeting = meetings[meetingIndex];
-      const date = new Date(meeting.start.dateTime || meeting.start.date);
-      const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-
-      const answer = await inquirer.prompt([{
-        type: 'list',
-        name: 'room',
-        message: `${meeting.summary} ${chalk.gray(`(${time})`)}`,
-        choices: data.allRooms.map((room, i) => ({
-          name: `${room.name} ${chalk.gray(`[${room.capacity}]`)}${i === 0 ? chalk.green(' ← recommended') : ''}`,
-          value: room
-        })),
-        loop: false
-      }]);
-
-      finalRooms[meetingIndex] = answer.room;
-    }
-  }
-
-  // Process all meetings
-  console.log('');
-  for (const [meetingIndex, data] of Object.entries(meetingSelections)) {
+    const { meetingIndex, room } = selection;
     const meeting = meetings[meetingIndex];
-    const room = finalRooms[meetingIndex] || data.room;
 
     const spinner = ora({
       text: chalk.gray(`Adding ${room.name} to "${meeting.summary}"...`),
@@ -211,78 +172,45 @@ async function runCommand() {
       groupedMeetings[dateKey].push({ meeting, index, date });
     });
 
-    // Create choices with day separators
+    // Create choices for custom prompt
     const choices = [];
-    Object.keys(groupedMeetings).forEach((dateKey, groupIndex) => {
+    Object.keys(groupedMeetings).forEach((dateKey) => {
       const group = groupedMeetings[dateKey];
-      const firstDate = group[0].date;
-
-      const today = new Date();
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-
-      let dayLabel;
-      if (firstDate.toDateString() === today.toDateString()) {
-        dayLabel = chalk.bold.green('Today, ') + firstDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      } else if (firstDate.toDateString() === tomorrow.toDateString()) {
-        dayLabel = chalk.bold.yellow('Tomorrow, ') + firstDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      } else {
-        dayLabel = chalk.bold(firstDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }));
-      }
-
-      if (groupIndex > 0) {
-        choices.push(new inquirer.Separator());
-      }
-      choices.push(new inquirer.Separator(dayLabel));
 
       group.forEach(({ meeting, index, date }) => {
         const rooms = allAvailableRooms[index];
+        if (!rooms || rooms.length === 0) return; // Skip meetings with no rooms
+
         const name = meeting.summary || 'Untitled Meeting';
         const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-        if (!rooms || rooms.length === 0) {
-          choices.push({
-            name: `  ${name} ${chalk.gray(`(${time})`)} ${chalk.red('(no room available)')}`,
-            value: null,
-            disabled: true
-          });
-        } else {
-          const room = rooms[0];
-          const roomLabel = rooms.length > 1
-            ? chalk.green(`→ ${room.name}`) + chalk.gray(` [${room.capacity}] (+${rooms.length - 1})`)
-            : chalk.green(`→ ${room.name}`) + chalk.gray(` [${room.capacity}]`);
-
-          choices.push({
-            name: `  ${name} ${chalk.gray(`(${time})`)} ${roomLabel}`,
-            value: { meetingIndex: index, room: room, allRooms: rooms }
-          });
-        }
+        choices.push({
+          name: name,
+          time: time,
+          meetingIndex: index,
+          rooms: rooms
+        });
       });
     });
 
-    const answers = await inquirer.prompt([
-      {
-        type: 'checkbox',
-        name: 'meetings',
-        message: chalk.cyan('Select meetings to add rooms to:'),
-        choices: choices,
-        pageSize: 15
-      },
-      {
-        type: 'confirm',
-        name: 'confirm',
-        message: chalk.yellow('Are you sure you want to add these rooms?'),
-        default: true,
-        when: (answers) => answers.meetings.length > 0
-      }
-    ]);
+    const selections = await roomPickerPrompt({
+      message: 'Select meetings and rooms',
+      choices: choices
+    });
 
-    if (!answers.meetings || answers.meetings.length === 0) {
+    if (!selections || selections.length === 0) {
       console.log(chalk.yellow('\n⊘ No meetings selected. Exiting.\n'));
       return;
     }
 
-    if (!answers.confirm) {
+    const confirmAnswer = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'confirm',
+      message: chalk.yellow('Are you sure you want to add these rooms?'),
+      default: true
+    }]);
+
+    if (!confirmAnswer.confirm) {
       console.log(chalk.yellow('\n⊘ Cancelled. No changes made.\n'));
       return;
     }
@@ -291,7 +219,7 @@ async function runCommand() {
     const { added, skipped, failed } = await processSelectedMeetings(
       calendar,
       meetingsWithoutRooms,
-      answers.meetings
+      selections
     );
 
     showSummary(added, skipped, failed);

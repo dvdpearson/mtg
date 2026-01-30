@@ -27,10 +27,14 @@
     "start": "node cli.js"
   },
   "dependencies": {
+    "@inquirer/core": "^11.1.1",
+    "@inquirer/type": "^4.0.3",
     "boxen": "^7.1.1",
     "chalk": "^5.3.0",
+    "cli-cursor": "^5.0.0",
     "cli-table3": "^0.6.5",
     "commander": "^12.1.0",
+    "figures": "^6.1.0",
     "googleapis": "^144.0.0",
     "inquirer": "^9.2.12",
     "ora": "^8.0.1"
