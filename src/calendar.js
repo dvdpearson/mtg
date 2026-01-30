@@ -100,10 +100,17 @@ function getNewToken() {
             server.close();
 
             const { tokens } = await oauth2Client.getToken(code);
+
+            // Verify we got a refresh token
+            if (!tokens.refresh_token) {
+              console.log(chalk.yellow('\n⚠ Warning: No refresh token received. You may need to re-authenticate next time.\n'));
+            }
+
             oauth2Client.setCredentials(tokens);
-            fs.writeFileSync(getTokenPath(), JSON.stringify(tokens));
+            fs.writeFileSync(getTokenPath(), JSON.stringify(tokens, null, 2));
 
             console.log(chalk.green('\n✓ Authentication successful!\n'));
+            console.log(chalk.gray(`Token saved to: ${getTokenPath()}\n`));
             resolve(oauth2Client);
           }
         }
@@ -119,6 +126,7 @@ function getNewToken() {
     server.listen(PORT, () => {
       const authUrl = oauth2Client.generateAuthUrl({
         access_type: 'offline',
+        prompt: 'consent',
         scope: ['https://www.googleapis.com/auth/calendar'],
         redirect_uri: `http://localhost:${PORT}`
       });
