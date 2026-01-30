@@ -4,7 +4,8 @@ import figures from 'figures';
 
 const require = createRequire(import.meta.url);
 const inquirer = require('inquirer');
-const CheckboxPrompt = inquirer.prompt.prompts.checkbox;
+const Prompt = inquirer.ui.Prompt;
+const CheckboxPrompt = Prompt.prompts.checkbox;
 
 class RoomPickerPrompt extends CheckboxPrompt {
   constructor(questions, rl, answers) {
