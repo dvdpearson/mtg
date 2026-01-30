@@ -34,12 +34,13 @@ class RoomPickerPrompt extends Base {
     const validation = this.handleSubmitEvents(
       events.line.pipe(map(() => this.getSelectedValues()))
     );
-    validation.success.forEach(this.onEnd.bind(this));
-    validation.error.forEach(this.onError.bind(this));
+
+    validation.success.subscribe(this.onEnd.bind(this));
+    validation.error.subscribe(this.onError.bind(this));
 
     events.keypress
       .pipe(takeUntil(validation.success))
-      .forEach(this.onKeypress.bind(this));
+      .subscribe(this.onKeypress.bind(this));
 
     cliCursor.hide();
     this.render();
