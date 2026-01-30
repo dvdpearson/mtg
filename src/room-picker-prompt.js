@@ -1,8 +1,12 @@
-import inquirer from 'inquirer';
+import { createRequire } from 'module';
 import chalk from 'chalk';
 import figures from 'figures';
 
-class RoomPickerPrompt extends inquirer.prompts.checkbox {
+const require = createRequire(import.meta.url);
+const inquirer = require('inquirer');
+const CheckboxPrompt = inquirer.prompt.prompts.checkbox;
+
+class RoomPickerPrompt extends CheckboxPrompt {
   constructor(questions, rl, answers) {
     super(questions, rl, answers);
     this.roomSelections = new Map();
