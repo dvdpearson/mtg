@@ -1,0 +1,18 @@
+# Development files
+.git/
+.gitignore
+.DS_Store
+.vscode/
+.idea/
+
+# Build artifacts
+*.tgz
+dist/
+
+# Documentation (keep README.md)
+docs/
+
+# Test credentials
+credentials.json
+token.json
+config.json
