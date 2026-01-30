@@ -34,9 +34,39 @@ export async function authorize() {
   const tokenPath = getTokenPath();
 
   if (fs.existsSync(tokenPath)) {
-    const token = JSON.parse(fs.readFileSync(tokenPath));
-    oauth2Client.setCredentials(token);
-    return oauth2Client;
+    try {
+      const token = JSON.parse(fs.readFileSync(tokenPath));
+
+      // Check if token has refresh_token
+      if (!token.refresh_token) {
+        console.log(chalk.yellow('\n⚠ Token missing refresh token. Re-authenticating...\n'));
+        fs.unlinkSync(tokenPath);
+        return getNewToken();
+      }
+
+      oauth2Client.setCredentials(token);
+
+      // Test if the token works by attempting to refresh it
+      try {
+        await oauth2Client.getAccessToken();
+      } catch (error) {
+        if (error.message && error.message.includes('refresh token')) {
+          console.log(chalk.yellow('\n⚠ Token invalid. Re-authenticating...\n'));
+          fs.unlinkSync(tokenPath);
+          return getNewToken();
+        }
+        throw error;
+      }
+
+      return oauth2Client;
+    } catch (error) {
+      // If token is corrupted, delete it and re-authenticate
+      if (fs.existsSync(tokenPath)) {
+        fs.unlinkSync(tokenPath);
+      }
+      console.log(chalk.yellow('\n⚠ Token corrupted. Re-authenticating...\n'));
+      return getNewToken();
+    }
   }
 
   return getNewToken();
