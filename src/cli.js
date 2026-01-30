@@ -69,19 +69,49 @@ async function processSelectedMeetings(calendar, meetings, selections) {
   let skipped = 0;
   let failed = 0;
 
-  // Group selections by meeting (in case user selected multiple rooms for same meeting, use first)
-  const meetingRoomMap = {};
+  // Group by meeting and check for multi-room options
+  const meetingSelections = {};
   for (const selection of selections) {
     if (!selection) continue;
-    const { meetingIndex, room } = selection;
-    if (!meetingRoomMap[meetingIndex]) {
-      meetingRoomMap[meetingIndex] = room;
+    const { meetingIndex, room, allRooms } = selection;
+    if (!meetingSelections[meetingIndex]) {
+      meetingSelections[meetingIndex] = { room, allRooms };
     }
   }
 
-  // Process each meeting
-  for (const [meetingIndex, room] of Object.entries(meetingRoomMap)) {
+  // For meetings with multiple rooms, let user choose
+  const finalRooms = {};
+  const multiRoomMeetings = Object.entries(meetingSelections).filter(([_, data]) => data.allRooms?.length > 1);
+
+  if (multiRoomMeetings.length > 0) {
+    console.log('');
+    console.log(chalk.cyan('Pick rooms for meetings with multiple options:\n'));
+
+    for (const [meetingIndex, data] of multiRoomMeetings) {
+      const meeting = meetings[meetingIndex];
+      const date = new Date(meeting.start.dateTime || meeting.start.date);
+      const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+      const answer = await inquirer.prompt([{
+        type: 'list',
+        name: 'room',
+        message: `${meeting.summary} ${chalk.gray(`(${time})`)}`,
+        choices: data.allRooms.map((room, i) => ({
+          name: `${room.name} ${chalk.gray(`[${room.capacity}]`)}${i === 0 ? chalk.green(' ← recommended') : ''}`,
+          value: room
+        })),
+        loop: false
+      }]);
+
+      finalRooms[meetingIndex] = answer.room;
+    }
+  }
+
+  // Process all meetings
+  console.log('');
+  for (const [meetingIndex, data] of Object.entries(meetingSelections)) {
     const meeting = meetings[meetingIndex];
+    const room = finalRooms[meetingIndex] || data.room;
 
     const spinner = ora({
       text: chalk.gray(`Adding ${room.name} to "${meeting.summary}"...`),
@@ -168,23 +198,6 @@ async function runCommand() {
     spinner.succeed(chalk.green(`Found ${meetingsWithoutRooms.length} meeting${meetingsWithoutRooms.length !== 1 ? 's' : ''} without rooms`));
     console.log('');
 
-    // Ask if user wants to see all room options
-    const hasMultipleRoomOptions = allAvailableRooms.some(rooms => rooms && rooms.length > 1);
-    let showAllRooms = false;
-
-    if (hasMultipleRoomOptions) {
-      const modeAnswer = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'showAll',
-          message: chalk.cyan('Some meetings have multiple room options. Show all rooms?'),
-          default: false
-        }
-      ]);
-      showAllRooms = modeAnswer.showAll;
-      console.log('');
-    }
-
     // Group meetings by day
     const groupedMeetings = {};
     meetingsWithoutRooms.forEach((meeting, index) => {
@@ -228,37 +241,20 @@ async function runCommand() {
         const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
         if (!rooms || rooms.length === 0) {
-          // No rooms available - show disabled entry
           choices.push({
             name: `  ${name} ${chalk.gray(`(${time})`)} ${chalk.red('(no room available)')}`,
             value: null,
             disabled: true
           });
-        } else if (rooms.length === 1 || !showAllRooms) {
-          // Single room OR showing recommended only
+        } else {
           const room = rooms[0];
           const roomLabel = rooms.length > 1
-            ? chalk.green(`→ ${room.name}`) + chalk.gray(` (+${rooms.length - 1} more)`)
-            : chalk.green(`→ ${room.name}`);
+            ? chalk.green(`→ ${room.name}`) + chalk.gray(` [${room.capacity}] (+${rooms.length - 1})`)
+            : chalk.green(`→ ${room.name}`) + chalk.gray(` [${room.capacity}]`);
 
           choices.push({
             name: `  ${name} ${chalk.gray(`(${time})`)} ${roomLabel}`,
             value: { meetingIndex: index, room: room, allRooms: rooms }
-          });
-        } else {
-          // Multiple rooms AND user wants to see all - show each as separate option
-          rooms.forEach((room, roomIndex) => {
-            const isRecommended = roomIndex === 0;
-            const indent = roomIndex > 0 ? '    ' : '  ';
-            const capacity = chalk.gray(`[${room.capacity}]`);
-            const roomLabel = isRecommended
-              ? chalk.green(`→ ${room.name}`) + ` ${capacity} ` + chalk.gray(`(recommended)`)
-              : chalk.cyan(`→ ${room.name}`) + ` ${capacity}`;
-
-            choices.push({
-              name: `${indent}${isRecommended ? name : ''} ${chalk.gray(isRecommended ? `(${time})` : '')} ${roomLabel}`,
-              value: { meetingIndex: index, room: room }
-            });
           });
         }
       });
