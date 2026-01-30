@@ -5,6 +5,7 @@ import { fromEvent } from 'rxjs';
 import { filter, map, share, takeUntil } from 'rxjs/operators';
 import Base from 'inquirer/lib/prompts/base.js';
 import observe from 'inquirer/lib/utils/events.js';
+import Paginator from 'inquirer/lib/utils/paginator.js';
 
 class RoomPickerPrompt extends Base {
   constructor(questions, rl, answers) {
@@ -22,6 +23,9 @@ class RoomPickerPrompt extends Base {
     this.selectableChoices = this.opt.choices.filter(
       (choice) => choice.type !== 'separator'
     );
+
+    // Initialize paginator
+    this.paginator = new Paginator(this.screen);
   }
 
   _run(cb) {
@@ -114,12 +118,15 @@ class RoomPickerPrompt extends Base {
     }
 
     let choiceIndex = 0;
-    this.opt.choices.forEach((choice) => {
+    let allChoicesOutput = '';
+    let realIndexPosition = 0;
+
+    this.opt.choices.forEach((choice, index) => {
       if (choice.type === 'separator') {
         if (choice.line === '') {
-          bottomContent += '\n' + chalk.dim('──────────────') + '\n';
+          allChoicesOutput += '\n' + chalk.dim('──────────────') + '\n';
         } else {
-          bottomContent += '\n' + chalk.bold(choice.line) + '\n';
+          allChoicesOutput += '\n' + chalk.bold(choice.line) + '\n';
         }
         return;
       }
@@ -128,6 +135,11 @@ class RoomPickerPrompt extends Base {
       const isCursor = choiceIndex === this.pointer;
       const roomIndex = this.roomSelections.get(choiceIndex) || 0;
       const room = choice.rooms[roomIndex];
+
+      // Track the actual line position for the cursor
+      if (isCursor) {
+        realIndexPosition = allChoicesOutput.split('\n').length;
+      }
 
       let checkbox = isSelected ? chalk.green(figures.radioOn) : figures.radioOff;
       let line = `${checkbox} ${choice.name} ${chalk.gray(`(${choice.time})`)}`;
@@ -140,16 +152,18 @@ class RoomPickerPrompt extends Base {
       }
 
       if (isCursor) {
-        bottomContent += chalk.cyan(`${figures.pointer} ${line}\n`);
+        allChoicesOutput += chalk.cyan(`${figures.pointer} ${line}\n`);
       } else {
-        bottomContent += `  ${line}\n`;
+        allChoicesOutput += `  ${line}\n`;
       }
 
       choiceIndex++;
     });
 
     if (error) {
-      bottomContent += '\n' + chalk.red('>> ') + error;
+      bottomContent = chalk.red('>> ') + error;
+    } else {
+      bottomContent = this.paginator.paginate(allChoicesOutput, realIndexPosition, this.opt.pageSize);
     }
 
     this.screen.render(message, bottomContent);
