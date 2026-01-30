@@ -230,6 +230,17 @@ async function runCommand() {
       return;
     }
 
+    // Show summary of changes
+    console.log(chalk.cyan.bold('\n📋 Changes to be made:\n'));
+    selections.forEach((selection) => {
+      const meeting = meetingsWithoutRooms[selection.meetingIndex];
+      const meetingName = meeting.summary || 'Untitled Meeting';
+      const date = new Date(meeting.start.dateTime || meeting.start.date);
+      const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      console.log(chalk.gray('  • ') + chalk.white(meetingName) + chalk.gray(` (${time})`) + chalk.green(` → ${selection.room.name}`));
+    });
+    console.log('');
+
     const confirmAnswer = await inquirer.prompt([{
       type: 'confirm',
       name: 'confirm',
