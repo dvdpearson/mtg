@@ -411,6 +411,99 @@ async function setupCommand() {
   }
 }
 
+// Rooms command - interactive room management
+async function roomsCommand() {
+  ensureConfigDir();
+
+  while (true) {
+    const rooms = listRooms();
+
+    console.log(chalk.cyan.bold('\n🏢 Meeting Rooms\n'));
+
+    if (rooms.length > 0) {
+      const table = new Table({
+        head: [chalk.cyan('Name'), chalk.cyan('Email'), chalk.cyan('Capacity')],
+        colWidths: [25, 60, 10]
+      });
+      rooms.forEach(room => {
+        table.push([room.name, room.email, room.capacity]);
+      });
+      console.log(table.toString());
+      console.log('');
+    } else {
+      console.log(chalk.gray('No rooms configured.\n'));
+    }
+
+    const action = await inquirer.prompt([{
+      type: 'list',
+      name: 'action',
+      message: 'What would you like to do?',
+      choices: [
+        { name: 'Add a room', value: 'add' },
+        { name: 'Remove a room', value: 'remove' },
+        { name: 'Exit', value: 'exit' }
+      ]
+    }]);
+
+    if (action.action === 'exit') {
+      console.log('');
+      break;
+    }
+
+    if (action.action === 'add') {
+      const roomDetails = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'name',
+          message: 'Room name:',
+          validate: input => input ? true : 'Room name is required'
+        },
+        {
+          type: 'input',
+          name: 'email',
+          message: 'Room email (e.g., room@resource.calendar.google.com):',
+          validate: input => {
+            if (!input) return 'Email is required';
+            if (!input.includes('@')) return 'Invalid email format';
+            return true;
+          }
+        },
+        {
+          type: 'input',
+          name: 'capacity',
+          message: 'Room capacity (number of people):',
+          validate: input => {
+            const num = parseInt(input);
+            if (isNaN(num) || num < 1) return 'Please enter a valid number';
+            return true;
+          }
+        }
+      ]);
+
+      const result = addRoom(roomDetails.name, roomDetails.email, roomDetails.capacity);
+      console.log(result.success ? chalk.green(`\n✓ ${result.message}`) : chalk.red(`\n✗ ${result.message}`));
+    } else if (action.action === 'remove') {
+      if (rooms.length === 0) {
+        console.log(chalk.yellow('\nNo rooms to remove.\n'));
+        continue;
+      }
+
+      const removeChoice = await inquirer.prompt([{
+        type: 'list',
+        name: 'email',
+        message: 'Which room would you like to remove?',
+        choices: rooms.map(room => ({
+          name: `${room.name} (${room.email})`,
+          value: room.email
+        }))
+      }]);
+
+      const result = removeRoom(removeChoice.email);
+      console.log(result.success ? chalk.green(`\n✓ ${result.message}`) : chalk.red(`\n✗ ${result.message}`));
+    }
+  }
+}
+
 // Version
 const packageJson = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url)));
 
@@ -431,6 +524,12 @@ program
   .command('setup')
   .description('Set up Google Calendar OAuth credentials')
   .action(setupCommand);
+
+// Rooms command
+program
+  .command('rooms')
+  .description('Manage meeting rooms interactively')
+  .action(roomsCommand);
 
 // Config command
 program

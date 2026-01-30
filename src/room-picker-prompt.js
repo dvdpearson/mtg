@@ -53,7 +53,13 @@ class RoomPickerPrompt extends Base {
     const len = this.selectableChoices.length;
     const key = e.key;
 
-    if (key.name === 'up' || key.name === 'k') {
+    if (key.name === 'q' || key.name === 'escape') {
+      this.status = 'answered';
+      this.render();
+      this.screen.done();
+      cliCursor.show();
+      this.done([]);
+    } else if (key.name === 'up' || key.name === 'k') {
       this.pointer = this.pointer > 0 ? this.pointer - 1 : len - 1;
       this.render();
     } else if (key.name === 'down' || key.name === 'j') {
@@ -114,7 +120,7 @@ class RoomPickerPrompt extends Base {
     let bottomContent = '';
 
     if (!error) {
-      message += chalk.dim('(Press <space> to select, <↑↓> to move, <←→> to change room, <enter> to submit)');
+      message += chalk.dim('(Press <space> to select, <↑↓> to move, <←→> to change room, <enter> to submit, <q> to quit)');
     }
 
     let choiceIndex = 0;
