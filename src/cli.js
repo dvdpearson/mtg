@@ -168,6 +168,23 @@ async function runCommand() {
     spinner.succeed(chalk.green(`Found ${meetingsWithoutRooms.length} meeting${meetingsWithoutRooms.length !== 1 ? 's' : ''} without rooms`));
     console.log('');
 
+    // Ask if user wants to see all room options
+    const hasMultipleRoomOptions = allAvailableRooms.some(rooms => rooms && rooms.length > 1);
+    let showAllRooms = false;
+
+    if (hasMultipleRoomOptions) {
+      const modeAnswer = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'showAll',
+          message: chalk.cyan('Some meetings have multiple room options. Show all rooms?'),
+          default: false
+        }
+      ]);
+      showAllRooms = modeAnswer.showAll;
+      console.log('');
+    }
+
     // Group meetings by day
     const groupedMeetings = {};
     meetingsWithoutRooms.forEach((meeting, index) => {
@@ -217,22 +234,28 @@ async function runCommand() {
             value: null,
             disabled: true
           });
-        } else if (rooms.length === 1) {
-          // Single room - show as before
+        } else if (rooms.length === 1 || !showAllRooms) {
+          // Single room OR showing recommended only
+          const room = rooms[0];
+          const roomLabel = rooms.length > 1
+            ? chalk.green(`→ ${room.name}`) + chalk.gray(` (+${rooms.length - 1} more)`)
+            : chalk.green(`→ ${room.name}`);
+
           choices.push({
-            name: `  ${name} ${chalk.gray(`(${time})`)} ${chalk.green(`→ ${rooms[0].name}`)}`,
-            value: { meetingIndex: index, room: rooms[0] }
+            name: `  ${name} ${chalk.gray(`(${time})`)} ${roomLabel}`,
+            value: { meetingIndex: index, room: room, allRooms: rooms }
           });
         } else {
-          // Multiple rooms - show each as separate option
+          // Multiple rooms AND user wants to see all - show each as separate option
           rooms.forEach((room, roomIndex) => {
             const isRecommended = roomIndex === 0;
+            const indent = roomIndex > 0 ? '    ' : '  ';
             const roomLabel = isRecommended
               ? chalk.green(`→ ${room.name}`) + chalk.gray(` (recommended)`)
               : chalk.cyan(`→ ${room.name}`);
 
             choices.push({
-              name: `  ${name} ${chalk.gray(`(${time})`)} ${roomLabel}`,
+              name: `${indent}${isRecommended ? name : ''} ${chalk.gray(isRecommended ? `(${time})` : '')} ${roomLabel}`,
               value: { meetingIndex: index, room: room }
             });
           });
