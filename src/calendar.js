@@ -78,7 +78,6 @@ function getNewToken() {
     const PORT = 3000;
 
     console.log(chalk.cyan.bold('\n🔐 Authorization Required\n'));
-    console.log(chalk.yellow('Starting local server on port ' + PORT + '...\n'));
 
     const server = http.createServer(async (req, res) => {
       try {
