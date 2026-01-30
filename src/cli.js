@@ -219,7 +219,8 @@ async function runCommand() {
       type: 'room-picker',
       name: 'selections',
       message: 'Select meetings and rooms',
-      choices: choices
+      choices: choices,
+      pageSize: 15
     }]);
 
     const selections = answer.selections;
