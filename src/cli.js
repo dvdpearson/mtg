@@ -250,9 +250,10 @@ async function runCommand() {
           rooms.forEach((room, roomIndex) => {
             const isRecommended = roomIndex === 0;
             const indent = roomIndex > 0 ? '    ' : '  ';
+            const capacity = chalk.gray(`[${room.capacity}]`);
             const roomLabel = isRecommended
-              ? chalk.green(`→ ${room.name}`) + chalk.gray(` (recommended)`)
-              : chalk.cyan(`→ ${room.name}`);
+              ? chalk.green(`→ ${room.name}`) + ` ${capacity} ` + chalk.gray(`(recommended)`)
+              : chalk.cyan(`→ ${room.name}`) + ` ${capacity}`;
 
             choices.push({
               name: `${indent}${isRecommended ? name : ''} ${chalk.gray(isRecommended ? `(${time})` : '')} ${roomLabel}`,
