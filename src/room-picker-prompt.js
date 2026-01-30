@@ -1,13 +1,10 @@
-import { createRequire } from 'module';
 import chalk from 'chalk';
 import figures from 'figures';
 import cliCursor from 'cli-cursor';
 import { fromEvent } from 'rxjs';
 import { filter, map, share, takeUntil } from 'rxjs/operators';
-
-const require = createRequire(import.meta.url);
-const Base = require('inquirer/lib/prompts/base');
-const observe = require('inquirer/lib/utils/events');
+import Base from 'inquirer/lib/prompts/base.js';
+import observe from 'inquirer/lib/utils/events.js';
 
 class RoomPickerPrompt extends Base {
   constructor(questions, rl, answers) {
