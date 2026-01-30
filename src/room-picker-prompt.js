@@ -1,103 +1,81 @@
+import inquirer from 'inquirer';
 import chalk from 'chalk';
 import figures from 'figures';
-import cliCursor from 'cli-cursor';
-import { createPrompt, useState, useKeypress, usePrefix, isEnterKey, isSpaceKey } from '@inquirer/core';
 
-export default createPrompt((config, done) => {
-  const [status, setStatus] = useState('pending');
-  const [cursorPos, setCursorPos] = useState(0);
-  const [selectedItems, setSelectedItems] = useState(new Set());
-  const [roomSelections, setRoomSelections] = useState(new Map());
-  const prefix = usePrefix({ status });
-
-  useKeypress((key, rl) => {
-    if (isEnterKey(key)) {
-      const selections = config.choices
-        .map((choice, i) => {
-          if (choice.type === 'separator') return null;
-          if (selectedItems.has(i)) {
-            const roomIndex = roomSelections.get(i) || 0;
-            return {
-              meetingIndex: choice.meetingIndex,
-              room: choice.rooms[roomIndex]
-            };
-          }
-          return null;
-        })
-        .filter(Boolean);
-
-      setStatus('done');
-      done(selections);
-    } else if (isSpaceKey(key)) {
-      const choice = config.choices[cursorPos];
-      if (choice.type === 'separator') return;
-
-      const newSet = new Set(selectedItems);
-      if (newSet.has(cursorPos)) {
-        newSet.delete(cursorPos);
-      } else {
-        newSet.add(cursorPos);
-      }
-      setSelectedItems(newSet);
-    } else if (key.name === 'up' || key.name === 'k') {
-      let newPos = cursorPos;
-      do {
-        newPos = newPos > 0 ? newPos - 1 : config.choices.length - 1;
-      } while (config.choices[newPos].type === 'separator' && newPos !== cursorPos);
-      setCursorPos(newPos);
-    } else if (key.name === 'down' || key.name === 'j') {
-      let newPos = cursorPos;
-      do {
-        newPos = newPos < config.choices.length - 1 ? newPos + 1 : 0;
-      } while (config.choices[newPos].type === 'separator' && newPos !== cursorPos);
-      setCursorPos(newPos);
-    } else if (key.name === 'left') {
-      const choice = config.choices[cursorPos];
-      if (choice.type === 'separator') return;
-      if (choice.rooms && choice.rooms.length > 1) {
-        const current = roomSelections.get(cursorPos) || 0;
-        const newIndex = current > 0 ? current - 1 : choice.rooms.length - 1;
-        const newMap = new Map(roomSelections);
-        newMap.set(cursorPos, newIndex);
-        setRoomSelections(newMap);
-      }
-    } else if (key.name === 'right') {
-      const choice = config.choices[cursorPos];
-      if (choice.type === 'separator') return;
-      if (choice.rooms && choice.rooms.length > 1) {
-        const current = roomSelections.get(cursorPos) || 0;
-        const newIndex = current < choice.rooms.length - 1 ? current + 1 : 0;
-        const newMap = new Map(roomSelections);
-        newMap.set(cursorPos, newIndex);
-        setRoomSelections(newMap);
-      }
-    }
-  });
-
-  const message = chalk.bold(config.message);
-
-  if (status === 'done') {
-    return `${prefix} ${message}`;
+class RoomPickerPrompt extends inquirer.prompts.checkbox {
+  constructor(questions, rl, answers) {
+    super(questions, rl, answers);
+    this.roomSelections = new Map();
   }
 
-  const instructions = chalk.dim('(Press <space> to select, <↑↓> to move, <←→> to change room, <enter> to submit)');
+  onKeypress(e) {
+    const key = e.key;
 
-  const lines = [
-    `${prefix} ${message}`,
-    instructions,
-    ...config.choices.map((choice, index) => {
-      // Handle separators
+    if (key.name === 'left') {
+      const currentChoice = this.choices.getChoice(this.pointer);
+      if (currentChoice && currentChoice.rooms && currentChoice.rooms.length > 1) {
+        const current = this.roomSelections.get(this.pointer) || 0;
+        const newIndex = current > 0 ? current - 1 : currentChoice.rooms.length - 1;
+        this.roomSelections.set(this.pointer, newIndex);
+        this.render();
+      }
+      return;
+    }
+
+    if (key.name === 'right') {
+      const currentChoice = this.choices.getChoice(this.pointer);
+      if (currentChoice && currentChoice.rooms && currentChoice.rooms.length > 1) {
+        const current = this.roomSelections.get(this.pointer) || 0;
+        const newIndex = current < currentChoice.rooms.length - 1 ? current + 1 : 0;
+        this.roomSelections.set(this.pointer, newIndex);
+        this.render();
+      }
+      return;
+    }
+
+    super.onKeypress(e);
+  }
+
+  getCurrentValue() {
+    const choices = this.choices.filter((choice) => {
+      return !choice.type || choice.type === 'choice';
+    });
+
+    return choices.filter((choice) => choice.checked).map((choice) => {
+      const roomIndex = this.roomSelections.get(choice.realIndex) || 0;
+      return {
+        meetingIndex: choice.meetingIndex,
+        room: choice.rooms[roomIndex]
+      };
+    });
+  }
+
+  getQuestion() {
+    let message = chalk.bold(this.opt.message) + ' ';
+    message += chalk.dim('(Press <space> to select, <↑↓> to move, <←→> to change room, <enter> to submit)');
+    return message;
+  }
+
+  renderChoices() {
+    let output = '';
+    let choiceIndex = 0;
+
+    this.choices.forEach((choice, index) => {
       if (choice.type === 'separator') {
         if (choice.line === '') {
-          return chalk.dim('──────────────');
+          output += '\n' + chalk.dim('──────────────') + '\n';
+        } else {
+          output += '\n' + chalk.bold(choice.line) + '\n';
         }
-        return chalk.bold(choice.line);
+        return;
       }
 
-      const isSelected = selectedItems.has(index);
-      const isCursor = cursorPos === index;
-      const roomIndex = roomSelections.get(index) || 0;
+      const isSelected = choice.checked;
+      const isCursor = choiceIndex === this.pointer;
+      const roomIndex = this.roomSelections.get(choiceIndex) || 0;
       const room = choice.rooms[roomIndex];
+
+      choice.realIndex = choiceIndex;
 
       let checkbox = isSelected ? chalk.green(figures.radioOn) : figures.radioOff;
       let line = `${checkbox} ${choice.name} ${chalk.gray(`(${choice.time})`)}`;
@@ -107,16 +85,19 @@ export default createPrompt((config, done) => {
           ? `${chalk.green('→')} ${room.name} ${chalk.gray(`[${room.capacity}]`)} ${chalk.dim(`(${roomIndex + 1}/${choice.rooms.length})`)}`
           : `${chalk.green('→')} ${room.name} ${chalk.gray(`[${room.capacity}]`)}`;
         line += ` ${roomLabel}`;
-      } else {
-        line += ` ${chalk.red('(no room available)')}`;
       }
 
       if (isCursor) {
-        return chalk.cyan(`❯ ${line}`);
+        output += chalk.cyan(`${figures.pointer} ${line}\n`);
+      } else {
+        output += `  ${line}\n`;
       }
-      return `  ${line}`;
-    })
-  ];
 
-  return lines.join('\n');
-});
+      choiceIndex++;
+    });
+
+    return output;
+  }
+}
+
+export default RoomPickerPrompt;

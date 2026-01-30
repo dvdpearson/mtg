@@ -4,7 +4,9 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import boxen from 'boxen';
 import inquirer from 'inquirer';
-import roomPickerPrompt from './room-picker-prompt.js';
+import RoomPickerPrompt from './room-picker-prompt.js';
+
+inquirer.registerPrompt('room-picker', RoomPickerPrompt);
 import ora from 'ora';
 import Table from 'cli-table3';
 import { google } from 'googleapis';
@@ -213,10 +215,14 @@ async function runCommand() {
       });
     });
 
-    const selections = await roomPickerPrompt({
+    const answer = await inquirer.prompt([{
+      type: 'room-picker',
+      name: 'selections',
       message: 'Select meetings and rooms',
       choices: choices
-    });
+    }]);
+
+    const selections = answer.selections;
 
     if (!selections || selections.length === 0) {
       console.log(chalk.yellow('\n⊘ No meetings selected. Exiting.\n'));
