@@ -64,81 +64,33 @@ function showWelcome() {
 }
 
 // Process selected meetings
-async function processSelectedMeetings(calendar, meetings, allAvailableRooms, selectedIndices) {
+async function processSelectedMeetings(calendar, meetings, selections) {
   let added = 0;
   let skipped = 0;
   let failed = 0;
 
-  // First, collect room choices for all meetings with multiple options
-  const roomSelections = {};
-  const meetingsNeedingChoice = [];
-
-  for (const index of selectedIndices) {
-    const meeting = meetings[index];
-    const rooms = allAvailableRooms[index];
-
-    if (!rooms || rooms.length === 0) {
-      console.log(chalk.red(`\n✗ ${meeting.summary} - No room available`));
-      skipped++;
-      continue;
-    }
-
-    if (rooms.length === 1) {
-      roomSelections[index] = rooms[0];
-    } else {
-      meetingsNeedingChoice.push(index);
+  // Group selections by meeting (in case user selected multiple rooms for same meeting, use first)
+  const meetingRoomMap = {};
+  for (const selection of selections) {
+    if (!selection) continue;
+    const { meetingIndex, room } = selection;
+    if (!meetingRoomMap[meetingIndex]) {
+      meetingRoomMap[meetingIndex] = room;
     }
   }
 
-  // If there are meetings with multiple room options, show consolidated prompt
-  if (meetingsNeedingChoice.length > 0) {
-    console.log('');
-    console.log(chalk.cyan.bold('Choose rooms for meetings:\n'));
-
-    const questions = meetingsNeedingChoice.map(index => {
-      const meeting = meetings[index];
-      const rooms = allAvailableRooms[index];
-      const meetingDate = new Date(meeting.start.dateTime || meeting.start.date);
-      const time = meetingDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      const date = meetingDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-      return {
-        type: 'list',
-        name: `room_${index}`,
-        message: `${chalk.white(meeting.summary)} ${chalk.gray(`(${date} at ${time})`)}`,
-        choices: rooms.map((room, i) => ({
-          name: `${room.name} ${chalk.gray(`(capacity: ${room.capacity})`)}${i === 0 ? chalk.green(' ← suggested') : ''}`,
-          value: room
-        })),
-        pageSize: 10
-      };
-    });
-
-    const answers = await inquirer.prompt(questions);
-
-    // Store selected rooms
-    Object.keys(answers).forEach(key => {
-      const index = parseInt(key.split('_')[1]);
-      roomSelections[index] = answers[key];
-    });
-  }
-
-  // Now add all rooms
-  console.log('');
-  for (const index of selectedIndices) {
-    if (!roomSelections[index]) continue;
-
-    const meeting = meetings[index];
-    const selectedRoom = roomSelections[index];
+  // Process each meeting
+  for (const [meetingIndex, room] of Object.entries(meetingRoomMap)) {
+    const meeting = meetings[meetingIndex];
 
     const spinner = ora({
-      text: chalk.gray(`Adding ${selectedRoom.name} to "${meeting.summary}"...`),
+      text: chalk.gray(`Adding ${room.name} to "${meeting.summary}"...`),
       spinner: 'dots'
     }).start();
 
     try {
-      await addRoomToMeeting(calendar, meeting.id, selectedRoom.email);
-      spinner.succeed(chalk.green(`${selectedRoom.name} added to "${meeting.summary}"`));
+      await addRoomToMeeting(calendar, meeting.id, room.email);
+      spinner.succeed(chalk.green(`${room.name} added to "${meeting.summary}"`));
       added++;
     } catch (error) {
       spinner.fail(chalk.red(`Failed to add room to "${meeting.summary}": ${error.message}`));
@@ -258,20 +210,33 @@ async function runCommand() {
         const name = meeting.summary || 'Untitled Meeting';
         const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-        let roomInfo;
         if (!rooms || rooms.length === 0) {
-          roomInfo = chalk.red('(no room available)');
+          // No rooms available - show disabled entry
+          choices.push({
+            name: `  ${name} ${chalk.gray(`(${time})`)} ${chalk.red('(no room available)')}`,
+            value: null,
+            disabled: true
+          });
         } else if (rooms.length === 1) {
-          roomInfo = chalk.green(`→ ${rooms[0].name}`);
+          // Single room - show as before
+          choices.push({
+            name: `  ${name} ${chalk.gray(`(${time})`)} ${chalk.green(`→ ${rooms[0].name}`)}`,
+            value: { meetingIndex: index, room: rooms[0] }
+          });
         } else {
-          roomInfo = chalk.green(`→ ${rooms[0].name}`) + chalk.gray(` (+${rooms.length - 1} more)`);
-        }
+          // Multiple rooms - show each as separate option
+          rooms.forEach((room, roomIndex) => {
+            const isRecommended = roomIndex === 0;
+            const roomLabel = isRecommended
+              ? chalk.green(`→ ${room.name}`) + chalk.gray(` (recommended)`)
+              : chalk.cyan(`→ ${room.name}`);
 
-        choices.push({
-          name: `  ${name} ${chalk.gray(`(${time})`)} ${roomInfo}`,
-          value: index,
-          disabled: !rooms || rooms.length === 0
-        });
+            choices.push({
+              name: `  ${name} ${chalk.gray(`(${time})`)} ${roomLabel}`,
+              value: { meetingIndex: index, room: room }
+            });
+          });
+        }
       });
     });
 
@@ -306,7 +271,6 @@ async function runCommand() {
     const { added, skipped, failed } = await processSelectedMeetings(
       calendar,
       meetingsWithoutRooms,
-      allAvailableRooms,
       answers.meetings
     );
 
