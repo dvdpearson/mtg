@@ -172,10 +172,30 @@ async function runCommand() {
       groupedMeetings[dateKey].push({ meeting, index, date });
     });
 
-    // Create choices for custom prompt
+    // Create choices for custom prompt with day separators
     const choices = [];
-    Object.keys(groupedMeetings).forEach((dateKey) => {
+    Object.keys(groupedMeetings).forEach((dateKey, groupIndex) => {
       const group = groupedMeetings[dateKey];
+      const firstDate = group[0].date;
+
+      const today = new Date();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      let dayLabel;
+      if (firstDate.toDateString() === today.toDateString()) {
+        dayLabel = 'Today, ' + firstDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      } else if (firstDate.toDateString() === tomorrow.toDateString()) {
+        dayLabel = 'Tomorrow, ' + firstDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      } else {
+        dayLabel = firstDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+      }
+
+      // Add separator
+      if (groupIndex > 0) {
+        choices.push({ type: 'separator', line: '' });
+      }
+      choices.push({ type: 'separator', line: dayLabel });
 
       group.forEach(({ meeting, index, date }) => {
         const rooms = allAvailableRooms[index];

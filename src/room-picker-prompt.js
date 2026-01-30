@@ -14,6 +14,7 @@ export default createPrompt((config, done) => {
     if (isEnterKey(key)) {
       const selections = config.choices
         .map((choice, i) => {
+          if (choice.type === 'separator') return null;
           if (selectedItems.has(i)) {
             const roomIndex = roomSelections.get(i) || 0;
             return {
@@ -28,6 +29,9 @@ export default createPrompt((config, done) => {
       setStatus('done');
       done(selections);
     } else if (isSpaceKey(key)) {
+      const choice = config.choices[cursorPos];
+      if (choice.type === 'separator') return;
+
       const newSet = new Set(selectedItems);
       if (newSet.has(cursorPos)) {
         newSet.delete(cursorPos);
@@ -36,11 +40,20 @@ export default createPrompt((config, done) => {
       }
       setSelectedItems(newSet);
     } else if (key.name === 'up' || key.name === 'k') {
-      setCursorPos(cursorPos > 0 ? cursorPos - 1 : config.choices.length - 1);
+      let newPos = cursorPos;
+      do {
+        newPos = newPos > 0 ? newPos - 1 : config.choices.length - 1;
+      } while (config.choices[newPos].type === 'separator' && newPos !== cursorPos);
+      setCursorPos(newPos);
     } else if (key.name === 'down' || key.name === 'j') {
-      setCursorPos(cursorPos < config.choices.length - 1 ? cursorPos + 1 : 0);
+      let newPos = cursorPos;
+      do {
+        newPos = newPos < config.choices.length - 1 ? newPos + 1 : 0;
+      } while (config.choices[newPos].type === 'separator' && newPos !== cursorPos);
+      setCursorPos(newPos);
     } else if (key.name === 'left') {
       const choice = config.choices[cursorPos];
+      if (choice.type === 'separator') return;
       if (choice.rooms && choice.rooms.length > 1) {
         const current = roomSelections.get(cursorPos) || 0;
         const newIndex = current > 0 ? current - 1 : choice.rooms.length - 1;
@@ -50,6 +63,7 @@ export default createPrompt((config, done) => {
       }
     } else if (key.name === 'right') {
       const choice = config.choices[cursorPos];
+      if (choice.type === 'separator') return;
       if (choice.rooms && choice.rooms.length > 1) {
         const current = roomSelections.get(cursorPos) || 0;
         const newIndex = current < choice.rooms.length - 1 ? current + 1 : 0;
@@ -72,6 +86,14 @@ export default createPrompt((config, done) => {
     `${prefix} ${message}`,
     instructions,
     ...config.choices.map((choice, index) => {
+      // Handle separators
+      if (choice.type === 'separator') {
+        if (choice.line === '') {
+          return chalk.dim('──────────────');
+        }
+        return chalk.bold(choice.line);
+      }
+
       const isSelected = selectedItems.has(index);
       const isCursor = cursorPos === index;
       const roomIndex = roomSelections.get(index) || 0;
