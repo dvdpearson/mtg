@@ -200,17 +200,25 @@ export function filterMeetingsWithoutRooms(meetings) {
     if (nonResourceAttendees.length <= 1) return false;
 
     // Check if meeting has a room that hasn't declined
-    const hasAcceptedRoom = meeting.attendees.some(attendee => {
-      const isRoom = attendee.resource === true ||
-                     (attendee.email && attendee.email.includes('@resource.calendar.google.com'));
-      if (!isRoom) return false;
+    const roomAttendees = meeting.attendees.filter(attendee =>
+      attendee.resource === true ||
+      (attendee.email && attendee.email.includes('@resource.calendar.google.com'))
+    );
 
-      // Consider a room as "has room" only if it hasn't declined
-      const status = attendee.responseStatus || 'needsAction';
-      return status !== 'declined';
-    });
+    // If there are rooms, check if any have accepted/tentative/needsAction status
+    if (roomAttendees.length > 0) {
+      const hasAcceptedRoom = roomAttendees.some(room => {
+        const status = room.responseStatus || 'needsAction';
+        return status === 'accepted' || status === 'tentative' || status === 'needsAction';
+      });
 
-    if (hasAcceptedRoom) return false;
+      // Only filter out if there's an accepted/tentative/needsAction room
+      if (hasAcceptedRoom) return false;
+
+      // If we get here, all rooms have declined, so include this meeting
+    }
+
+    // No rooms at all, or all rooms declined - continue with other checks
 
     // Check if meeting is only with remote workers
     const otherAttendees = nonResourceAttendees.filter(attendee => {
