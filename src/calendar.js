@@ -211,11 +211,6 @@ export function filterMeetingsWithoutRooms(meetings) {
     const nonResourceAttendees = meeting.attendees.filter(attendee => !attendee.resource);
     if (DEBUG) console.log('  Non-resource attendees:', nonResourceAttendees.length);
 
-    if (nonResourceAttendees.length <= 1) {
-      if (DEBUG) console.log('  ✗ Only 1 or fewer non-resource attendees');
-      return false;
-    }
-
     // Check if meeting has a room that hasn't declined
     const roomAttendees = meeting.attendees.filter(attendee =>
       attendee.resource === true ||
@@ -244,8 +239,15 @@ export function filterMeetingsWithoutRooms(meetings) {
         return false;
       }
 
-      // If we get here, all rooms have declined, so include this meeting
+      // If we get here, all rooms have declined
+      // Include this meeting regardless of attendee count
       if (DEBUG) console.log('  ✓ All rooms declined - including');
+    } else {
+      // No rooms at all - apply attendee count check
+      if (nonResourceAttendees.length <= 1) {
+        if (DEBUG) console.log('  ✗ Only 1 or fewer non-resource attendees and no rooms');
+        return false;
+      }
     }
 
     // No rooms at all, or all rooms declined - continue with other checks
