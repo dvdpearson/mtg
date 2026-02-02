@@ -190,20 +190,44 @@ export async function getThisWeeksMeetings(calendar) {
 export function filterMeetingsWithoutRooms(meetings) {
   const config = loadConfig();
   const REMOTE_WORKERS = config.remoteWorkers || [];
+  const DEBUG = process.env.MTG_DEBUG === '1';
 
   return meetings.filter(meeting => {
-    if (!meeting.start || (!meeting.start.dateTime && !meeting.start.date)) return false;
-    if (!meeting.end || (!meeting.end.dateTime && !meeting.end.date)) return false;
-    if (!meeting.attendees) return false;
+    if (DEBUG) console.log('\n--- Checking:', meeting.summary);
+
+    if (!meeting.start || (!meeting.start.dateTime && !meeting.start.date)) {
+      if (DEBUG) console.log('  ✗ No start time');
+      return false;
+    }
+    if (!meeting.end || (!meeting.end.dateTime && !meeting.end.date)) {
+      if (DEBUG) console.log('  ✗ No end time');
+      return false;
+    }
+    if (!meeting.attendees) {
+      if (DEBUG) console.log('  ✗ No attendees');
+      return false;
+    }
 
     const nonResourceAttendees = meeting.attendees.filter(attendee => !attendee.resource);
-    if (nonResourceAttendees.length <= 1) return false;
+    if (DEBUG) console.log('  Non-resource attendees:', nonResourceAttendees.length);
+
+    if (nonResourceAttendees.length <= 1) {
+      if (DEBUG) console.log('  ✗ Only 1 or fewer non-resource attendees');
+      return false;
+    }
 
     // Check if meeting has a room that hasn't declined
     const roomAttendees = meeting.attendees.filter(attendee =>
       attendee.resource === true ||
       (attendee.email && attendee.email.includes('@resource.calendar.google.com'))
     );
+
+    if (DEBUG) {
+      console.log('  Room attendees:', roomAttendees.length);
+      roomAttendees.forEach(room => {
+        console.log(`    - ${room.email}: ${room.responseStatus || 'needsAction'}`);
+      });
+    }
 
     // If there are rooms, check if any have accepted/tentative/needsAction status
     if (roomAttendees.length > 0) {
@@ -212,10 +236,16 @@ export function filterMeetingsWithoutRooms(meetings) {
         return status === 'accepted' || status === 'tentative' || status === 'needsAction';
       });
 
+      if (DEBUG) console.log('  Has accepted room:', hasAcceptedRoom);
+
       // Only filter out if there's an accepted/tentative/needsAction room
-      if (hasAcceptedRoom) return false;
+      if (hasAcceptedRoom) {
+        if (DEBUG) console.log('  ✗ Room accepted/pending');
+        return false;
+      }
 
       // If we get here, all rooms have declined, so include this meeting
+      if (DEBUG) console.log('  ✓ All rooms declined - including');
     }
 
     // No rooms at all, or all rooms declined - continue with other checks
@@ -226,15 +256,25 @@ export function filterMeetingsWithoutRooms(meetings) {
       return true;
     });
 
+    if (DEBUG) console.log('  Other attendees (non-self/organizer):', otherAttendees.length);
+
     if (otherAttendees.length > 0) {
       const allRemote = otherAttendees.every(attendee => {
         const name = (attendee.displayName || attendee.email || '').toLowerCase();
-        return REMOTE_WORKERS.some(remoteName => name.includes(remoteName));
+        const isRemote = REMOTE_WORKERS.some(remoteName => name.includes(remoteName));
+        if (DEBUG) console.log(`    - ${name}: remote=${isRemote}`);
+        return isRemote;
       });
 
-      if (allRemote) return false;
+      if (DEBUG) console.log('  All remote:', allRemote);
+
+      if (allRemote) {
+        if (DEBUG) console.log('  ✗ All attendees are remote');
+        return false;
+      }
     }
 
+    if (DEBUG) console.log('  ✓ Including meeting');
     return true;
   });
 }
