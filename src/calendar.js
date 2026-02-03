@@ -362,10 +362,27 @@ export async function addRoomToMeeting(calendar, eventId, roomEmail) {
     event.data.attendees = [];
   }
 
-  const alreadyAdded = event.data.attendees.some(a => a.email === roomEmail);
-  if (alreadyAdded) {
-    throw new Error('Room already added to this meeting');
+  // Check if this specific room is already added
+  const existingRoom = event.data.attendees.find(a => a.email === roomEmail);
+  if (existingRoom) {
+    const status = existingRoom.responseStatus || 'needsAction';
+    // If the room is already accepted/tentative/pending, don't re-add
+    if (status === 'accepted' || status === 'tentative' || status === 'needsAction') {
+      throw new Error('Room already added to this meeting');
+    }
+    // Room has declined - remove it so we can re-add it fresh
   }
+
+  // Remove all declined room attendees (cleanup)
+  event.data.attendees = event.data.attendees.filter(attendee => {
+    const isRoom = attendee.resource === true ||
+      (attendee.email && attendee.email.includes('@resource.calendar.google.com'));
+    if (!isRoom) return true; // Keep non-room attendees
+
+    const status = attendee.responseStatus || 'needsAction';
+    // Remove rooms that have declined
+    return status !== 'declined';
+  });
 
   event.data.attendees.push({
     email: roomEmail,
