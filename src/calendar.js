@@ -190,6 +190,8 @@ export async function getThisWeeksMeetings(calendar) {
 export function filterMeetingsWithoutRooms(meetings) {
   const config = loadConfig();
   const REMOTE_WORKERS = config.remoteWorkers || [];
+  const ROOMS = config.rooms || [];
+  const configuredRoomEmails = ROOMS.map(r => r.email.toLowerCase());
   const DEBUG = process.env.MTG_DEBUG === '1';
 
   return meetings.filter(meeting => {
@@ -208,14 +210,17 @@ export function filterMeetingsWithoutRooms(meetings) {
       return false;
     }
 
-    const nonResourceAttendees = meeting.attendees.filter(attendee => !attendee.resource);
+    // Helper to check if an attendee is a room
+    const isRoom = (attendee) =>
+      attendee.resource === true ||
+      (attendee.email && attendee.email.includes('@resource.calendar.google.com')) ||
+      (attendee.email && configuredRoomEmails.includes(attendee.email.toLowerCase()));
+
+    const nonResourceAttendees = meeting.attendees.filter(attendee => !isRoom(attendee));
     if (DEBUG) console.log('  Non-resource attendees:', nonResourceAttendees.length);
 
     // Check if meeting has a room that hasn't declined
-    const roomAttendees = meeting.attendees.filter(attendee =>
-      attendee.resource === true ||
-      (attendee.email && attendee.email.includes('@resource.calendar.google.com'))
-    );
+    const roomAttendees = meeting.attendees.filter(isRoom);
 
     if (DEBUG) {
       console.log('  Room attendees:', roomAttendees.length);
@@ -304,6 +309,26 @@ export function getAttendeeCount(meeting) {
 export async function findAllAvailableRooms(calendar, meeting) {
   const config = loadConfig();
   const ROOMS = config.rooms || [];
+  const configuredRoomEmails = ROOMS.map(r => r.email.toLowerCase());
+
+  // Helper to check if an attendee is a room
+  const isRoom = (attendee) =>
+    attendee.resource === true ||
+    (attendee.email && attendee.email.includes('@resource.calendar.google.com')) ||
+    (attendee.email && configuredRoomEmails.includes(attendee.email.toLowerCase()));
+
+  // Get rooms already on this meeting with accepted/tentative status - don't suggest these
+  const existingAcceptedRooms = new Set();
+  if (meeting.attendees) {
+    meeting.attendees.forEach(attendee => {
+      if (isRoom(attendee)) {
+        const status = attendee.responseStatus;
+        if (status === 'accepted' || status === 'tentative') {
+          existingAcceptedRooms.add(attendee.email.toLowerCase());
+        }
+      }
+    });
+  }
 
   const attendeeCount = getAttendeeCount(meeting);
   const timeMin = meeting.start.dateTime || meeting.start.date;
@@ -323,6 +348,11 @@ export async function findAllAvailableRooms(calendar, meeting) {
   const availability = await checkRoomAvailability(calendar, roomEmails, startTime, endTime);
 
   const availableRooms = ROOMS.filter(room => {
+    // Skip rooms already on this meeting with accepted/tentative status
+    if (existingAcceptedRooms.has(room.email.toLowerCase())) {
+      return false;
+    }
+
     const roomAvailability = availability[room.email];
     if (!roomAvailability) return false;
 
@@ -334,6 +364,10 @@ export async function findAllAvailableRooms(calendar, meeting) {
 
   if (availableRooms.length === 0) {
     const anyAvailable = ROOMS.filter(room => {
+      // Skip rooms already on this meeting with accepted/tentative status
+      if (existingAcceptedRooms.has(room.email.toLowerCase())) {
+        return false;
+      }
       const roomAvailability = availability[room.email];
       if (!roomAvailability) return false;
       return !roomAvailability.busy || roomAvailability.busy.length === 0;
@@ -353,6 +387,10 @@ export async function findAvailableRoom(calendar, meeting) {
 
 // Add room to meeting
 export async function addRoomToMeeting(calendar, eventId, roomEmail) {
+  const config = loadConfig();
+  const ROOMS = config.rooms || [];
+  const configuredRoomEmails = ROOMS.map(r => r.email.toLowerCase());
+
   const event = await calendar.events.get({
     calendarId: 'primary',
     eventId
@@ -362,25 +400,33 @@ export async function addRoomToMeeting(calendar, eventId, roomEmail) {
     event.data.attendees = [];
   }
 
-  // Check if this specific room is already added
-  const existingRoom = event.data.attendees.find(a => a.email === roomEmail);
+  // Helper to check if an attendee is a room
+  const isRoom = (attendee) =>
+    attendee.resource === true ||
+    (attendee.email && attendee.email.includes('@resource.calendar.google.com')) ||
+    (attendee.email && configuredRoomEmails.includes(attendee.email.toLowerCase()));
+
+  // Check if this specific room is already added with accepted/tentative status
+  const existingRoom = event.data.attendees.find(a => a.email.toLowerCase() === roomEmail.toLowerCase());
   if (existingRoom) {
-    const status = existingRoom.responseStatus || 'needsAction';
-    // If the room is already accepted/tentative/pending, don't re-add
-    if (status === 'accepted' || status === 'tentative' || status === 'needsAction') {
-      throw new Error('Room already added to this meeting');
+    const status = existingRoom.responseStatus;
+    // If room is already accepted or tentative, the job is done - return success
+    if (status === 'accepted' || status === 'tentative') {
+      return event.data;
     }
-    // Room has declined - remove it so we can re-add it fresh
+    // For declined, needsAction, or undefined status - remove it so we can re-add fresh
   }
 
-  // Remove all declined room attendees (cleanup)
+  // Remove the room we're about to add (if it exists) and any other declined rooms
   event.data.attendees = event.data.attendees.filter(attendee => {
-    const isRoom = attendee.resource === true ||
-      (attendee.email && attendee.email.includes('@resource.calendar.google.com'));
-    if (!isRoom) return true; // Keep non-room attendees
+    // Always keep non-room attendees
+    if (!isRoom(attendee)) return true;
 
-    const status = attendee.responseStatus || 'needsAction';
+    // Remove the room we're trying to add (so we can re-add it fresh)
+    if (attendee.email.toLowerCase() === roomEmail.toLowerCase()) return false;
+
     // Remove rooms that have declined
+    const status = attendee.responseStatus;
     return status !== 'declined';
   });
 
