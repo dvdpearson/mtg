@@ -411,6 +411,50 @@ async function setupCommand() {
   }
 }
 
+// Setup import command - import credentials from base64 string
+async function setupImportCommand(base64Creds) {
+  ensureConfigDir();
+
+  try {
+    const jsonStr = Buffer.from(base64Creds, 'base64').toString('utf-8');
+    const creds = JSON.parse(jsonStr);
+
+    // Validate it looks like OAuth credentials
+    if (!creds.installed && !creds.web) {
+      throw new Error('Invalid credentials format - missing "installed" or "web" key');
+    }
+
+    fs.writeFileSync(getCredentialsPath(), JSON.stringify(creds, null, 2));
+    console.log(chalk.green('\n✓ Credentials imported successfully!\n'));
+    console.log(chalk.gray('Config location: ') + chalk.white(getCredentialsPath()));
+    console.log(chalk.yellow('\nRun ') + chalk.cyan('mtg') + chalk.yellow(' to start using the tool!\n'));
+  } catch (error) {
+    console.log(chalk.red(`\n✗ Error: ${error.message}\n`));
+    process.exit(1);
+  }
+}
+
+// Setup export command - export credentials as base64 for sharing
+async function setupExportCommand() {
+  try {
+    const credsPath = getCredentialsPath();
+    if (!fs.existsSync(credsPath)) {
+      console.log(chalk.red('\n✗ No credentials found. Run "mtg setup" first.\n'));
+      process.exit(1);
+    }
+
+    const content = fs.readFileSync(credsPath, 'utf-8');
+    JSON.parse(content); // Validate JSON
+
+    const base64 = Buffer.from(content).toString('base64');
+    console.log(chalk.cyan.bold('\n📋 Share this command with others:\n'));
+    console.log(chalk.white(`mtg setup import ${base64}\n`));
+  } catch (error) {
+    console.log(chalk.red(`\n✗ Error: ${error.message}\n`));
+    process.exit(1);
+  }
+}
+
 // Rooms command - interactive room management
 async function roomsCommand() {
   ensureConfigDir();
@@ -519,11 +563,21 @@ program
   .description('Run the interactive meeting room assistant')
   .action(runCommand);
 
-// Setup command
-program
+// Setup command with subcommands
+const setupCmd = program
   .command('setup')
   .description('Set up Google Calendar OAuth credentials')
   .action(setupCommand);
+
+setupCmd
+  .command('import <base64>')
+  .description('Import credentials from base64 string')
+  .action(setupImportCommand);
+
+setupCmd
+  .command('export')
+  .description('Export credentials as base64 for sharing')
+  .action(setupExportCommand);
 
 // Rooms command
 program
