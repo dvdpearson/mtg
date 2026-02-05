@@ -27,6 +27,18 @@ mtg setup
 
 Follow the prompts to authenticate and configure your rooms.
 
+### Sharing Credentials
+
+To share credentials with teammates (so they don't need to create their own OAuth app):
+
+```bash
+# Export your credentials as a shareable command
+mtg setup export
+
+# Others can import using the generated command
+mtg setup import <base64-string>
+```
+
 ## Usage
 
 ```bash
