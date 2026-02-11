@@ -17,12 +17,28 @@ class RoomPickerPrompt extends Base {
 
     this.pointer = 0;
     this.selected = new Set();
+    this.markedForDecline = new Set();
     this.roomSelections = new Map();
 
     // Filter out separators for navigation
     this.selectableChoices = this.opt.choices.filter(
       (choice) => choice.type !== 'separator'
     );
+
+    // Precompute day group boundaries: indices into selectableChoices that start each day
+    this.dayStarts = [];
+    this.todayDayIndex = -1;
+    let selectableIndex = 0;
+    for (const choice of this.opt.choices) {
+      if (choice.type === 'separator' && choice.line) {
+        this.dayStarts.push(selectableIndex);
+        if (choice.line.startsWith('Today')) {
+          this.todayDayIndex = this.dayStarts.length - 1;
+        }
+      } else if (choice.type !== 'separator') {
+        selectableIndex++;
+      }
+    }
 
     // Initialize paginator
     this.paginator = new Paginator(this.screen);
@@ -58,7 +74,7 @@ class RoomPickerPrompt extends Base {
       this.render();
       this.screen.done();
       cliCursor.show();
-      this.done([]);
+      this.done({ selections: [], declined: [] });
     } else if (key.name === 'up' || key.name === 'k') {
       this.pointer = this.pointer > 0 ? this.pointer - 1 : len - 1;
       this.render();
@@ -67,15 +83,32 @@ class RoomPickerPrompt extends Base {
       this.render();
     } else if (key.name === 'space') {
       const choiceIndex = this.pointer;
-      if (this.selected.has(choiceIndex)) {
-        this.selected.delete(choiceIndex);
-      } else {
-        this.selected.add(choiceIndex);
+      const choice = this.selectableChoices[choiceIndex];
+      // Only allow room selection for meetings without rooms
+      if (!choice.hasRoom) {
+        if (this.selected.has(choiceIndex)) {
+          this.selected.delete(choiceIndex);
+        } else {
+          this.selected.add(choiceIndex);
+          this.markedForDecline.delete(choiceIndex);
+        }
       }
       this.render();
+    } else if (e.value === 'd' || e.value === 'D') {
+      const choiceIndex = this.pointer;
+      const choice = this.selectableChoices[choiceIndex];
+      if (choice.canDecline) {
+        if (this.markedForDecline.has(choiceIndex)) {
+          this.markedForDecline.delete(choiceIndex);
+        } else {
+          this.markedForDecline.add(choiceIndex);
+          this.selected.delete(choiceIndex);
+        }
+        this.render();
+      }
     } else if (key.name === 'left') {
       const choice = this.selectableChoices[this.pointer];
-      if (choice.rooms && choice.rooms.length > 1) {
+      if (!choice.hasRoom && !this.markedForDecline.has(this.pointer) && choice.rooms && choice.rooms.length > 1) {
         const current = this.roomSelections.get(this.pointer) || 0;
         const newIndex = current > 0 ? current - 1 : choice.rooms.length - 1;
         this.roomSelections.set(this.pointer, newIndex);
@@ -83,17 +116,43 @@ class RoomPickerPrompt extends Base {
       }
     } else if (key.name === 'right') {
       const choice = this.selectableChoices[this.pointer];
-      if (choice.rooms && choice.rooms.length > 1) {
+      if (!choice.hasRoom && !this.markedForDecline.has(this.pointer) && choice.rooms && choice.rooms.length > 1) {
         const current = this.roomSelections.get(this.pointer) || 0;
         const newIndex = current < choice.rooms.length - 1 ? current + 1 : 0;
         this.roomSelections.set(this.pointer, newIndex);
+        this.render();
+      }
+    } else if (e.value === ']') {
+      // Jump to next day group
+      const nextDay = this.dayStarts.find(start => start > this.pointer);
+      if (nextDay !== undefined) {
+        this.pointer = nextDay;
+        this.render();
+      }
+    } else if (e.value === '[') {
+      // Jump to previous day group
+      const prevDays = this.dayStarts.filter(start => start < this.pointer);
+      if (prevDays.length > 0) {
+        // If pointer is already at a day start, go to the one before it
+        const currentDayStart = this.dayStarts.find(start => start === this.pointer);
+        if (currentDayStart !== undefined && prevDays.length > 0) {
+          this.pointer = prevDays[prevDays.length - 1];
+        } else {
+          this.pointer = prevDays[prevDays.length - 1];
+        }
+        this.render();
+      }
+    } else if (e.value === 't' || e.value === 'T') {
+      // Jump to today
+      if (this.todayDayIndex >= 0) {
+        this.pointer = this.dayStarts[this.todayDayIndex];
         this.render();
       }
     }
   }
 
   getSelectedValues() {
-    return Array.from(this.selected).map((index) => {
+    const selections = Array.from(this.selected).map((index) => {
       const choice = this.selectableChoices[index];
       const roomIndex = this.roomSelections.get(index) || 0;
       return {
@@ -101,6 +160,12 @@ class RoomPickerPrompt extends Base {
         room: choice.rooms[roomIndex]
       };
     });
+
+    const declined = Array.from(this.markedForDecline).map((index) => {
+      return this.selectableChoices[index].meetingIndex;
+    });
+
+    return { selections, declined };
   }
 
   onEnd(state) {
@@ -119,9 +184,8 @@ class RoomPickerPrompt extends Base {
     let message = this.getQuestion();
     let bottomContent = '';
 
-    if (!error) {
-      message += chalk.dim('(Press <space> to select, <↑↓> to move, <←→> to change room, <enter> to submit, <q> to quit)');
-    }
+    const cols = process.stdout.columns || 80;
+    message += '\n' + chalk.dim('─'.repeat(cols));
 
     let choiceIndex = 0;
     let allChoicesOutput = '';
@@ -129,32 +193,49 @@ class RoomPickerPrompt extends Base {
 
     this.opt.choices.forEach((choice, index) => {
       if (choice.type === 'separator') {
-        if (choice.line === '') {
-          allChoicesOutput += '\n' + chalk.dim('──────────────') + '\n';
-        } else {
-          allChoicesOutput += '\n' + chalk.bold(choice.line) + '\n';
-        }
+        const label = choice.line || '';
+        allChoicesOutput += '\n' + chalk.bold.bgHex('#444').whiteBright(` ${label} `) + '\n';
         return;
       }
 
       const isSelected = this.selected.has(choiceIndex);
+      const isDeclined = this.markedForDecline.has(choiceIndex);
       const isCursor = choiceIndex === this.pointer;
       const roomIndex = this.roomSelections.get(choiceIndex) || 0;
-      const room = choice.rooms[roomIndex];
 
       // Track the actual line position for the cursor
       if (isCursor) {
         realIndexPosition = allChoicesOutput.split('\n').length;
       }
 
-      let checkbox = isSelected ? chalk.green(figures.radioOn) : figures.radioOff;
-      let line = `${checkbox} ${choice.name} ${chalk.gray(`(${choice.time})`)}`;
+      let line;
 
-      if (choice.rooms && choice.rooms.length > 0) {
-        const roomLabel = choice.rooms.length > 1
-          ? `${chalk.green('→')} ${room.name} ${chalk.gray(`[${room.capacity}]`)} ${chalk.dim(`(${roomIndex + 1}/${choice.rooms.length})`)}`
-          : `${chalk.green('→')} ${room.name} ${chalk.gray(`[${room.capacity}]`)}`;
-        line += ` ${roomLabel}`;
+      if (choice.hasRoom) {
+        // Meeting with existing room
+        let checkbox = isDeclined ? chalk.green(figures.radioOn) : chalk.dim('–');
+        line = `${checkbox} ${choice.name} ${chalk.gray(`(${choice.time})`)}`;
+        line += ` ${chalk.dim(`✓ ${choice.existingRoom}`)}`;
+        if (isDeclined) {
+          line += ` ${chalk.red.bold('DECLINE')}`;
+        }
+      } else {
+        // Meeting needing a room
+        let checkbox = (isSelected || isDeclined) ? chalk.green(figures.radioOn) : figures.radioOff;
+        line = `${checkbox} ${choice.name} ${chalk.gray(`(${choice.time})`)}`;
+
+        if (choice.rooms && choice.rooms.length > 0) {
+          const room = choice.rooms[roomIndex];
+          const arrow = isSelected ? chalk.green('→') : chalk.gray('→');
+          const roomName = isSelected ? chalk.green(room.name) : room.name;
+          const roomLabel = choice.rooms.length > 1
+            ? `${arrow} ${roomName} ${chalk.gray(`[${room.capacity}]`)} ${chalk.dim(`(${roomIndex + 1}/${choice.rooms.length})`)}`
+            : `${arrow} ${roomName} ${chalk.gray(`[${room.capacity}]`)}`;
+          line += ` ${roomLabel}`;
+        }
+
+        if (isDeclined) {
+          line += ` ${chalk.red.bold('DECLINE')}`;
+        }
       }
 
       if (isCursor) {
@@ -169,7 +250,38 @@ class RoomPickerPrompt extends Base {
     if (error) {
       bottomContent = chalk.red('>> ') + error;
     } else {
+      const footerSeparator = chalk.dim('─'.repeat(cols));
+
+      // Build context-aware help text
+      const choice = this.selectableChoices[this.pointer];
+      const isDeclined = this.markedForDecline.has(this.pointer);
+      const canSelect = choice && !choice.hasRoom;
+      const canDecline = choice && choice.canDecline;
+      const canCycleRoom = choice && !choice.hasRoom && !isDeclined && choice.rooms && choice.rooms.length > 1;
+      const hi = (text) => chalk.white.bold(text);
+      const lo = (text) => chalk.dim(text);
+
+      const hasNextDay = this.dayStarts.some(start => start > this.pointer);
+      const hasPrevDay = this.dayStarts.some(start => start < this.pointer);
+      const hasToday = this.todayDayIndex >= 0;
+
+      const parts = [
+        canSelect ? (this.selected.has(this.pointer) ? hi('<space> unselect') : hi('<space> select')) : lo('<space> select'),
+        canDecline ? (isDeclined ? hi('<d> cancel decline') : hi('<d> decline')) : lo('<d> decline'),
+        hi('<↑↓> move'),
+        canCycleRoom ? hi('<←→> room') : lo('<←→> room'),
+        hasNextDay ? hi('<]> next day') : lo('<]> next day'),
+        hasPrevDay ? hi('<[> prev day') : lo('<[> prev day'),
+        hasToday ? hi('<t> today') : lo('<t> today'),
+        hi('<enter> submit'),
+        hi('<q/esc> quit'),
+      ];
+      const helpText = chalk.dim('Shortcuts: ') + parts.join('  ');
+
       bottomContent = this.paginator.paginate(allChoicesOutput, realIndexPosition, this.opt.pageSize);
+      const hintText = '(Move up and down to reveal more choices)';
+      bottomContent = bottomContent.replace(hintText, '');
+      bottomContent += '\n' + footerSeparator + '\n' + helpText;
     }
 
     this.screen.render(message, bottomContent);

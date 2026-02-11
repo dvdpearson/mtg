@@ -18,3 +18,6 @@ dist/
 
 # User config
 config.json
+
+# Local AI assistant configuration
+CLAUDE.md
