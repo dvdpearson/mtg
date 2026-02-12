@@ -19,11 +19,37 @@ class RoomPickerPrompt extends Base {
     this.selected = new Set();
     this.markedForDecline = new Set();
     this.roomSelections = new Map();
+    this.showHelp = false;
 
     // Filter out separators for navigation
     this.selectableChoices = this.opt.choices.filter(
       (choice) => choice.type !== 'separator'
     );
+
+    // Restore previous selections if provided
+    const initial = this.opt.initialState;
+    if (initial) {
+      if (initial.selections) {
+        initial.selections.forEach(({ meetingIndex, room }) => {
+          const idx = this.selectableChoices.findIndex(c => c.meetingIndex === meetingIndex);
+          if (idx >= 0) {
+            this.selected.add(idx);
+            // Find the room index in the choice's rooms array
+            const choice = this.selectableChoices[idx];
+            if (choice.rooms && room) {
+              const roomIdx = choice.rooms.findIndex(r => r.email === room.email);
+              if (roomIdx >= 0) this.roomSelections.set(idx, roomIdx);
+            }
+          }
+        });
+      }
+      if (initial.declined) {
+        initial.declined.forEach((meetingIndex) => {
+          const idx = this.selectableChoices.findIndex(c => c.meetingIndex === meetingIndex);
+          if (idx >= 0) this.markedForDecline.add(idx);
+        });
+      }
+    }
 
     // Precompute day group boundaries: indices into selectableChoices that start each day
     this.dayStarts = [];
@@ -38,6 +64,10 @@ class RoomPickerPrompt extends Base {
       } else if (choice.type !== 'separator') {
         selectableIndex++;
       }
+    }
+    // If no "Today" group, fall back to the first day (nearest future)
+    if (this.todayDayIndex < 0 && this.dayStarts.length > 0) {
+      this.todayDayIndex = 0;
     }
 
     // Initialize paginator
@@ -74,7 +104,13 @@ class RoomPickerPrompt extends Base {
       this.render();
       this.screen.done();
       cliCursor.show();
-      this.done({ selections: [], declined: [] });
+      const hasChanges = this.selected.size > 0 || this.markedForDecline.size > 0;
+      if (hasChanges) {
+        const current = this.getSelectedValues();
+        this.done({ ...current, quit: true });
+      } else {
+        this.done({ selections: [], declined: [], quit: true });
+      }
     } else if (key.name === 'up' || key.name === 'k') {
       this.pointer = this.pointer > 0 ? this.pointer - 1 : len - 1;
       this.render();
@@ -148,6 +184,9 @@ class RoomPickerPrompt extends Base {
         this.pointer = this.dayStarts[this.todayDayIndex];
         this.render();
       }
+    } else if (e.value === '?') {
+      this.showHelp = !this.showHelp;
+      this.render();
     }
   }
 
@@ -194,7 +233,7 @@ class RoomPickerPrompt extends Base {
     this.opt.choices.forEach((choice, index) => {
       if (choice.type === 'separator') {
         const label = choice.line || '';
-        allChoicesOutput += '\n' + chalk.bold.bgHex('#444').whiteBright(` ${label} `) + '\n';
+        allChoicesOutput += '\n  ' + chalk.underline.bold(label) + '\n';
         return;
       }
 
@@ -212,7 +251,7 @@ class RoomPickerPrompt extends Base {
 
       if (choice.hasRoom) {
         // Meeting with existing room
-        let checkbox = isDeclined ? chalk.green(figures.radioOn) : chalk.dim('–');
+        let checkbox = isDeclined ? chalk.green(figures.radioOn) : figures.radioOff;
         line = `${checkbox} ${choice.name} ${chalk.gray(`(${choice.time})`)}`;
         line += ` ${chalk.dim(`✓ ${choice.existingRoom}`)}`;
         if (isDeclined) {
@@ -239,9 +278,9 @@ class RoomPickerPrompt extends Base {
       }
 
       if (isCursor) {
-        allChoicesOutput += chalk.cyan(`${figures.pointer} ${line}\n`);
+        allChoicesOutput += chalk.cyan(`${figures.pointer}${figures.pointer} ${line}\n`);
       } else {
-        allChoicesOutput += `  ${line}\n`;
+        allChoicesOutput += `   ${line}\n`;
       }
 
       choiceIndex++;
@@ -265,18 +304,67 @@ class RoomPickerPrompt extends Base {
       const hasPrevDay = this.dayStarts.some(start => start < this.pointer);
       const hasToday = this.todayDayIndex >= 0;
 
-      const parts = [
-        canSelect ? (this.selected.has(this.pointer) ? hi('<space> unselect') : hi('<space> select')) : lo('<space> select'),
-        canDecline ? (isDeclined ? hi('<d> cancel decline') : hi('<d> decline')) : lo('<d> decline'),
-        hi('<↑↓> move'),
-        canCycleRoom ? hi('<←→> room') : lo('<←→> room'),
-        hasNextDay ? hi('<]> next day') : lo('<]> next day'),
-        hasPrevDay ? hi('<[> prev day') : lo('<[> prev day'),
-        hasToday ? hi('<t> today') : lo('<t> today'),
-        hi('<enter> submit'),
-        hi('<q/esc> quit'),
-      ];
-      const helpText = chalk.dim('Shortcuts: ') + parts.join('  ');
+      const meetingInfo = choice
+        ? chalk.cyan('Organizer: ') + chalk.white(choice.organizer || 'Unknown') +
+          chalk.cyan('  Guests: ') + chalk.white(String(choice.guestCount || 0))
+        : '';
+
+      let helpText;
+      if (this.showHelp) {
+        // Build 3-column shortcut grid like Claude Code
+        const colWidth = Math.floor(cols / 3);
+        const pad = (str, visible) => {
+          const padding = Math.max(0, colWidth - visible.length);
+          return str + ' '.repeat(padding);
+        };
+        const entry = (active, key, desc) => {
+          const text = `${key} ${desc}`;
+          return active ? lo(key + ' ') + chalk.white(desc) : lo(text);
+        };
+
+        const selectLabel = this.selected.has(this.pointer) ? 'unselect' : 'select';
+        const declineLabel = isDeclined ? 'cancel decline' : 'decline';
+
+        // Column layout: [col1, col2, col3] per row
+        const rows = [
+          [
+            entry(canSelect, 'space', 'to ' + selectLabel),
+            entry(true, '↑↓', 'to move'),
+            entry(hasNextDay, ']', 'next day'),
+          ],
+          [
+            entry(canDecline, 'd', 'to ' + declineLabel),
+            entry(canCycleRoom, '←→', 'to change room'),
+            entry(hasPrevDay, '[', 'prev day'),
+          ],
+          [
+            entry(true, 'enter', 'to submit'),
+            entry(hasToday, 't', 'to jump to today'),
+            entry(true, '?', 'to hide help'),
+          ],
+          [
+            entry(true, 'q/esc', 'to quit'),
+            '',
+            '',
+          ],
+        ];
+
+        const grid = rows.map(row => {
+          const filledCells = row.filter(cell => cell);
+          if (filledCells.length === 0) return null;
+          const cells = filledCells.map((cell, i) => {
+            if (i === filledCells.length - 1) return cell;
+            const visible = cell.replace(/\x1b\[[0-9;]*m/g, '');
+            const padding = Math.max(0, colWidth - visible.length);
+            return cell + ' '.repeat(padding);
+          });
+          return '  ' + cells.join('');
+        }).filter(Boolean).join('\n');
+
+        helpText = meetingInfo + '\n\n' + grid;
+      } else {
+        helpText = meetingInfo + '\n' + chalk.dim('(? for help)');
+      }
 
       bottomContent = this.paginator.paginate(allChoicesOutput, realIndexPosition, this.opt.pageSize);
       const hintText = '(Move up and down to reveal more choices)';

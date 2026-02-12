@@ -283,6 +283,8 @@ async function runCommand() {
         const name = meeting.summary || 'Untitled Meeting';
         const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
         const canDecline = !meeting.organizer?.self;
+        const organizer = meeting.organizer?.self ? 'You' : (meeting.organizer?.displayName || meeting.organizer?.email || 'Unknown');
+        const guestCount = getAttendeeCount(meeting);
 
         if (needsRoom) {
           const rooms = roomAvailabilityMap.get(index) || [];
@@ -293,7 +295,9 @@ async function runCommand() {
             time,
             meetingIndex: index,
             rooms,
-            canDecline
+            canDecline,
+            organizer,
+            guestCount
           });
         } else {
           const existingRoom = getExistingRoomName(meeting);
@@ -303,7 +307,9 @@ async function runCommand() {
             meetingIndex: index,
             hasRoom: true,
             existingRoom: existingRoom || 'Room',
-            canDecline
+            canDecline,
+            organizer,
+            guestCount
           });
         }
       });
@@ -316,74 +322,110 @@ async function runCommand() {
       return;
     }
 
-    const answer = await inquirer.prompt([{
-      type: 'room-picker',
-      name: 'selections',
-      message: 'Select meetings and rooms',
-      choices: choices,
-      pageSize: 15
-    }]);
+    let confirmed = false;
+    let finalSelections = [];
+    let finalDeclined = [];
+    let previousState = null;
+    while (!confirmed) {
+      const answer = await inquirer.prompt([{
+        type: 'room-picker',
+        name: 'selections',
+        message: 'Select meetings and rooms',
+        choices: choices,
+        initialState: previousState,
+        pageSize: 15
+      }]);
 
-    const { selections, declined } = answer.selections;
+      const { selections, declined, quit } = answer.selections;
 
-    if ((!selections || selections.length === 0) && (!declined || declined.length === 0)) {
-      console.log(chalk.yellow('\n⊘ No meetings selected. Exiting.\n'));
-      return;
-    }
+      if (quit) {
+        const hasChanges = (selections && selections.length > 0) || (declined && declined.length > 0);
+        if (hasChanges) {
+          const quitAnswer = await inquirer.prompt([{
+            type: 'confirm',
+            name: 'confirm',
+            message: chalk.yellow('You have unsaved changes. Are you sure you want to quit?'),
+            default: true
+          }]);
+          if (!quitAnswer.confirm) {
+            previousState = { selections, declined };
+            console.clear();
+            showWelcome();
+            console.log(chalk.green(`✓ ${statusMsg}`));
+            console.log('');
+            continue;
+          }
+        }
+        console.log(chalk.yellow('\n⊘ No changes made. Exiting.\n'));
+        return;
+      }
 
-    // Show summary of changes
-    console.log(chalk.cyan.bold('\n📋 Changes to be made:\n'));
-    if (selections && selections.length > 0) {
-      selections.forEach((selection) => {
-        const meeting = allMeetings[selection.meetingIndex].meeting;
-        const meetingName = meeting.summary || 'Untitled Meeting';
-        const date = new Date(meeting.start.dateTime || meeting.start.date);
-        const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-        console.log(chalk.gray('  • ') + chalk.white(meetingName) + chalk.gray(` (${time})`) + chalk.green(` → ${selection.room.name}`));
-      });
-    }
-    if (declined && declined.length > 0) {
-      declined.forEach((meetingIndex) => {
-        const meeting = allMeetings[meetingIndex].meeting;
-        const meetingName = meeting.summary || 'Untitled Meeting';
-        const date = new Date(meeting.start.dateTime || meeting.start.date);
-        const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-        console.log(chalk.gray('  • ') + chalk.white(meetingName) + chalk.gray(` (${time})`) + chalk.red(' ✗ DECLINE'));
-      });
-    }
-    console.log('');
+      if ((!selections || selections.length === 0) && (!declined || declined.length === 0)) {
+        console.log(chalk.yellow('\n⊘ No meetings selected. Exiting.\n'));
+        return;
+      }
 
-    const confirmAnswer = await inquirer.prompt([{
-      type: 'confirm',
-      name: 'confirm',
-      message: chalk.yellow('Are you sure you want to make these changes?'),
-      default: true
-    }]);
+      // Show summary of changes
+      console.log(chalk.cyan.bold('\n📋 Changes to be made:\n'));
+      if (selections && selections.length > 0) {
+        selections.forEach((selection) => {
+          const meeting = allMeetings[selection.meetingIndex].meeting;
+          const meetingName = meeting.summary || 'Untitled Meeting';
+          const date = new Date(meeting.start.dateTime || meeting.start.date);
+          const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          console.log(chalk.gray('  • ') + chalk.white(meetingName) + chalk.gray(` (${time})`) + chalk.green(` → ${selection.room.name}`));
+        });
+      }
+      if (declined && declined.length > 0) {
+        declined.forEach((meetingIndex) => {
+          const meeting = allMeetings[meetingIndex].meeting;
+          const meetingName = meeting.summary || 'Untitled Meeting';
+          const date = new Date(meeting.start.dateTime || meeting.start.date);
+          const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          console.log(chalk.gray('  • ') + chalk.white(meetingName) + chalk.gray(` (${time})`) + chalk.red(' ✗ DECLINE'));
+        });
+      }
+      console.log('');
 
-    if (!confirmAnswer.confirm) {
-      console.log(chalk.yellow('\n⊘ Cancelled. No changes made.\n'));
-      return;
+      const confirmAnswer = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'confirm',
+        message: chalk.yellow('Are you sure you want to make these changes?'),
+        default: true
+      }]);
+
+      if (confirmAnswer.confirm) {
+        confirmed = true;
+        finalSelections = selections;
+        finalDeclined = declined;
+      } else {
+        previousState = { selections, declined };
+        console.clear();
+        showWelcome();
+        console.log(chalk.green(`✓ ${statusMsg}`));
+        console.log('');
+      }
     }
 
     console.log('');
 
     // Process declines first
     let declineResult = { declined: 0, failed: 0 };
-    if (declined && declined.length > 0) {
+    if (finalDeclined && finalDeclined.length > 0) {
       declineResult = await processDeclinedMeetings(
         calendar,
         allMeetings.map(e => e.meeting),
-        declined
+        finalDeclined
       );
     }
 
     // Process room additions
     let roomResult = { added: 0, skipped: 0, failed: 0 };
-    if (selections && selections.length > 0) {
+    if (finalSelections && finalSelections.length > 0) {
       roomResult = await processSelectedMeetings(
         calendar,
         allMeetings.map(e => e.meeting),
-        selections
+        finalSelections
       );
     }
 
