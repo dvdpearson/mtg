@@ -453,6 +453,82 @@ export async function addRoomToMeeting(calendar, eventId, roomEmail) {
   return response.data;
 }
 
+// Decline a meeting (set self attendee to declined)
+export async function declineMeeting(calendar, eventId) {
+  const event = await calendar.events.get({
+    calendarId: 'primary',
+    eventId
+  });
+
+  const attendees = event.data.attendees || [];
+  const selfAttendee = attendees.find(a => a.self);
+  if (!selfAttendee) {
+    throw new Error('Could not find self in attendee list');
+  }
+
+  selfAttendee.responseStatus = 'declined';
+
+  const response = await calendar.events.update({
+    calendarId: 'primary',
+    eventId,
+    requestBody: event.data,
+    sendUpdates: 'none'
+  });
+
+  return response.data;
+}
+
+// Filter meetings that already have rooms (inverse of filterMeetingsWithoutRooms)
+export function filterMeetingsWithRooms(meetings) {
+  const config = loadConfig();
+  const REMOTE_WORKERS = config.remoteWorkers || [];
+  const ROOMS = config.rooms || [];
+  const configuredRoomEmails = ROOMS.map(r => r.email.toLowerCase());
+
+  return meetings.filter(meeting => {
+    if (!meeting.start || (!meeting.start.dateTime && !meeting.start.date)) return false;
+    if (!meeting.end || (!meeting.end.dateTime && !meeting.end.date)) return false;
+    if (!meeting.attendees) return false;
+
+    const isRoom = (attendee) =>
+      attendee.resource === true ||
+      (attendee.email && attendee.email.includes('@resource.calendar.google.com')) ||
+      (attendee.email && configuredRoomEmails.includes(attendee.email.toLowerCase()));
+
+    const nonResourceAttendees = meeting.attendees.filter(attendee => !isRoom(attendee));
+
+    // Same base checks: need 2+ non-resource attendees (or rooms present)
+    const roomAttendees = meeting.attendees.filter(isRoom);
+    if (roomAttendees.length === 0) return false;
+
+    // Must have at least an accepted/tentative/needsAction room
+    const hasAcceptedRoom = roomAttendees.some(room => {
+      const status = room.responseStatus || 'needsAction';
+      return status === 'accepted' || status === 'tentative' || status === 'needsAction';
+    });
+    if (!hasAcceptedRoom) return false;
+
+    // Need 2+ non-resource attendees
+    if (nonResourceAttendees.length <= 1) return false;
+
+    // Exclude all-remote meetings
+    const otherAttendees = nonResourceAttendees.filter(attendee => {
+      if (attendee.self || attendee.organizer) return false;
+      return true;
+    });
+
+    if (otherAttendees.length > 0) {
+      const allRemote = otherAttendees.every(attendee => {
+        const name = (attendee.displayName || attendee.email || '').toLowerCase();
+        return REMOTE_WORKERS.some(remoteName => name.includes(remoteName));
+      });
+      if (allRemote) return false;
+    }
+
+    return true;
+  });
+}
+
 // Format date/time
 export function formatDateTime(dateTimeString) {
   if (!dateTimeString) return 'Time not specified';

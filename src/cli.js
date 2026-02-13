@@ -30,9 +30,11 @@ import {
   authorize,
   getThisWeeksMeetings,
   filterMeetingsWithoutRooms,
+  filterMeetingsWithRooms,
   findAvailableRoom,
   findAllAvailableRooms,
   addRoomToMeeting,
+  declineMeeting,
   formatDateTime,
   getAttendeeCount
 } from './calendar.js';
@@ -94,31 +96,93 @@ async function processSelectedMeetings(calendar, meetings, selections) {
   return { added, skipped, failed };
 }
 
+// Process declined meetings
+async function processDeclinedMeetings(calendar, meetings, declinedIndices) {
+  let declined = 0;
+  let failed = 0;
+
+  for (const meetingIndex of declinedIndices) {
+    const meeting = meetings[meetingIndex];
+
+    const spinner = ora({
+      text: chalk.gray(`Declining "${meeting.summary}"...`),
+      spinner: 'dots'
+    }).start();
+
+    try {
+      await declineMeeting(calendar, meeting.id);
+      spinner.succeed(chalk.red(`Declined "${meeting.summary}"`));
+      declined++;
+    } catch (error) {
+      spinner.fail(chalk.red(`Failed to decline "${meeting.summary}": ${error.message}`));
+      failed++;
+    }
+  }
+
+  return { declined, failed };
+}
+
 // Show summary
-function showSummary(added, skipped, failed) {
+function showSummary(added, skipped, failed, declined, declineFailed) {
   console.log('');
   const summaryLines = [
     chalk.bold('Summary:'),
     '',
-    chalk.green(`✓ ${added} room${added !== 1 ? 's' : ''} added successfully`),
   ];
+
+  if (added > 0) {
+    summaryLines.push(chalk.green(`✓ ${added} room${added !== 1 ? 's' : ''} added successfully`));
+  }
+
+  if (declined > 0) {
+    summaryLines.push(chalk.red(`✗ ${declined} meeting${declined !== 1 ? 's' : ''} declined`));
+  }
 
   if (skipped > 0) {
     summaryLines.push(chalk.yellow(`⊘ ${skipped} meeting${skipped !== 1 ? 's' : ''} skipped (no room available)`));
   }
 
-  if (failed > 0) {
-    summaryLines.push(chalk.red(`✗ ${failed} failed`));
+  const totalFailed = (failed || 0) + (declineFailed || 0);
+  if (totalFailed > 0) {
+    summaryLines.push(chalk.red(`✗ ${totalFailed} failed`));
   }
+
+  const hasSuccess = added > 0 || declined > 0;
 
   const summary = boxen(summaryLines.join('\n'), {
     padding: 1,
     margin: 1,
     borderStyle: 'round',
-    borderColor: added > 0 ? 'green' : 'yellow'
+    borderColor: hasSuccess ? 'green' : 'yellow'
   });
 
   console.log(summary);
+}
+
+// Helper to get the existing room name from a meeting
+function getExistingRoomName(meeting) {
+  const config = loadConfig();
+  const ROOMS = config.rooms || [];
+  const configuredRoomEmails = ROOMS.map(r => r.email.toLowerCase());
+
+  const isRoom = (attendee) =>
+    attendee.resource === true ||
+    (attendee.email && attendee.email.includes('@resource.calendar.google.com')) ||
+    (attendee.email && configuredRoomEmails.includes(attendee.email.toLowerCase()));
+
+  if (!meeting.attendees) return null;
+
+  for (const attendee of meeting.attendees) {
+    if (isRoom(attendee)) {
+      const status = attendee.responseStatus || 'needsAction';
+      if (status === 'accepted' || status === 'tentative' || status === 'needsAction') {
+        // Try to find a friendly name from config
+        const configured = ROOMS.find(r => r.email.toLowerCase() === (attendee.email || '').toLowerCase());
+        return configured ? configured.name : (attendee.displayName || attendee.email);
+      }
+    }
+  }
+  return null;
 }
 
 // Main run command
@@ -139,39 +203,59 @@ async function runCommand() {
 
     const meetings = await getThisWeeksMeetings(calendar);
     const meetingsWithoutRooms = filterMeetingsWithoutRooms(meetings);
+    const meetingsWithRooms = filterMeetingsWithRooms(meetings);
 
-    if (meetingsWithoutRooms.length === 0) {
-      spinner.succeed(chalk.green('All upcoming meetings have rooms assigned!'));
+    if (meetingsWithoutRooms.length === 0 && meetingsWithRooms.length === 0) {
+      spinner.succeed(chalk.green('No upcoming meetings found!'));
       console.log('');
       return;
     }
 
+    // Merge into allMeetings sorted by start time, tagged with needsRoom
+    const allMeetings = [
+      ...meetingsWithoutRooms.map(m => ({ meeting: m, needsRoom: true })),
+      ...meetingsWithRooms.map(m => ({ meeting: m, needsRoom: false }))
+    ].sort((a, b) => {
+      const aTime = new Date(a.meeting.start.dateTime || a.meeting.start.date);
+      const bTime = new Date(b.meeting.start.dateTime || b.meeting.start.date);
+      return aTime - bTime;
+    });
+
     spinner.text = chalk.gray('Checking room availability...');
 
-    const allAvailableRooms = [];
-    for (const meeting of meetingsWithoutRooms) {
-      try {
-        const rooms = await findAllAvailableRooms(calendar, meeting);
-        allAvailableRooms.push(rooms);
-      } catch (error) {
-        allAvailableRooms.push([]);
+    // Check room availability only for meetings that need rooms
+    const roomAvailabilityMap = new Map();
+    for (let i = 0; i < allMeetings.length; i++) {
+      if (allMeetings[i].needsRoom) {
+        try {
+          const rooms = await findAllAvailableRooms(calendar, allMeetings[i].meeting);
+          roomAvailabilityMap.set(i, rooms);
+        } catch (error) {
+          roomAvailabilityMap.set(i, []);
+        }
       }
     }
 
-    spinner.succeed(chalk.green(`Found ${meetingsWithoutRooms.length} meeting${meetingsWithoutRooms.length !== 1 ? 's' : ''} without rooms`));
+    const roomlessCount = meetingsWithoutRooms.length;
+    const withRoomCount = meetingsWithRooms.length;
+    let statusMsg = `Found ${allMeetings.length} meeting${allMeetings.length !== 1 ? 's' : ''}`;
+    if (roomlessCount > 0) {
+      statusMsg += ` (${roomlessCount} without rooms)`;
+    }
+    spinner.succeed(chalk.green(statusMsg));
     console.log('');
 
     // Group meetings by day
     const groupedMeetings = {};
-    meetingsWithoutRooms.forEach((meeting, index) => {
-      const date = new Date(meeting.start.dateTime || meeting.start.date);
+    allMeetings.forEach((entry, index) => {
+      const date = new Date(entry.meeting.start.dateTime || entry.meeting.start.date);
       const dateKey = date.toDateString();
 
       if (!groupedMeetings[dateKey]) {
         groupedMeetings[dateKey] = [];
       }
 
-      groupedMeetings[dateKey].push({ meeting, index, date });
+      groupedMeetings[dateKey].push({ ...entry, index, date });
     });
 
     // Create choices for custom prompt with day separators
@@ -193,74 +277,159 @@ async function runCommand() {
         dayLabel = firstDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
       }
 
-      // Add separator
-      if (groupIndex > 0) {
-        choices.push({ type: 'separator', line: '' });
-      }
       choices.push({ type: 'separator', line: dayLabel });
 
-      group.forEach(({ meeting, index, date }) => {
-        const rooms = allAvailableRooms[index];
-        if (!rooms || rooms.length === 0) return; // Skip meetings with no rooms
-
+      group.forEach(({ meeting, needsRoom, index, date }) => {
         const name = meeting.summary || 'Untitled Meeting';
         const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const canDecline = !meeting.organizer?.self;
+        const organizer = meeting.organizer?.self ? 'You' : (meeting.organizer?.displayName || meeting.organizer?.email || 'Unknown');
+        const guestCount = getAttendeeCount(meeting);
 
-        choices.push({
-          name: name,
-          time: time,
-          meetingIndex: index,
-          rooms: rooms
-        });
+        if (needsRoom) {
+          const rooms = roomAvailabilityMap.get(index) || [];
+          if (rooms.length === 0 && !canDecline) return; // Skip if no rooms and can't decline
+
+          choices.push({
+            name,
+            time,
+            meetingIndex: index,
+            rooms,
+            canDecline,
+            organizer,
+            guestCount
+          });
+        } else {
+          const existingRoom = getExistingRoomName(meeting);
+          choices.push({
+            name,
+            time,
+            meetingIndex: index,
+            hasRoom: true,
+            existingRoom: existingRoom || 'Room',
+            canDecline,
+            organizer,
+            guestCount
+          });
+        }
       });
     });
 
-    const answer = await inquirer.prompt([{
-      type: 'room-picker',
-      name: 'selections',
-      message: 'Select meetings and rooms',
-      choices: choices,
-      pageSize: 15
-    }]);
-
-    const selections = answer.selections;
-
-    if (!selections || selections.length === 0) {
-      console.log(chalk.yellow('\n⊘ No meetings selected. Exiting.\n'));
+    // Check if there are any selectable choices
+    const selectableChoices = choices.filter(c => c.type !== 'separator');
+    if (selectableChoices.length === 0) {
+      console.log(chalk.green('All meetings have rooms and no actions available!\n'));
       return;
     }
 
-    // Show summary of changes
-    console.log(chalk.cyan.bold('\n📋 Changes to be made:\n'));
-    selections.forEach((selection) => {
-      const meeting = meetingsWithoutRooms[selection.meetingIndex];
-      const meetingName = meeting.summary || 'Untitled Meeting';
-      const date = new Date(meeting.start.dateTime || meeting.start.date);
-      const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      console.log(chalk.gray('  • ') + chalk.white(meetingName) + chalk.gray(` (${time})`) + chalk.green(` → ${selection.room.name}`));
-    });
-    console.log('');
+    let confirmed = false;
+    let finalSelections = [];
+    let finalDeclined = [];
+    let previousState = null;
+    while (!confirmed) {
+      const answer = await inquirer.prompt([{
+        type: 'room-picker',
+        name: 'selections',
+        message: 'Select meetings and rooms',
+        choices: choices,
+        initialState: previousState,
+        pageSize: 15
+      }]);
 
-    const confirmAnswer = await inquirer.prompt([{
-      type: 'confirm',
-      name: 'confirm',
-      message: chalk.yellow('Are you sure you want to add these rooms?'),
-      default: true
-    }]);
+      const { selections, declined, quit } = answer.selections;
 
-    if (!confirmAnswer.confirm) {
-      console.log(chalk.yellow('\n⊘ Cancelled. No changes made.\n'));
-      return;
+      if (quit) {
+        const hasChanges = (selections && selections.length > 0) || (declined && declined.length > 0);
+        if (hasChanges) {
+          const quitAnswer = await inquirer.prompt([{
+            type: 'confirm',
+            name: 'confirm',
+            message: chalk.yellow('You have unsaved changes. Are you sure you want to quit?'),
+            default: true
+          }]);
+          if (!quitAnswer.confirm) {
+            previousState = { selections, declined };
+            console.clear();
+            showWelcome();
+            console.log(chalk.green(`✓ ${statusMsg}`));
+            console.log('');
+            continue;
+          }
+        }
+        console.log(chalk.yellow('\n⊘ No changes made. Exiting.\n'));
+        return;
+      }
+
+      if ((!selections || selections.length === 0) && (!declined || declined.length === 0)) {
+        console.log(chalk.yellow('\n⊘ No meetings selected. Exiting.\n'));
+        return;
+      }
+
+      // Show summary of changes
+      console.log(chalk.cyan.bold('\n📋 Changes to be made:\n'));
+      if (selections && selections.length > 0) {
+        selections.forEach((selection) => {
+          const meeting = allMeetings[selection.meetingIndex].meeting;
+          const meetingName = meeting.summary || 'Untitled Meeting';
+          const date = new Date(meeting.start.dateTime || meeting.start.date);
+          const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          console.log(chalk.gray('  • ') + chalk.white(meetingName) + chalk.gray(` (${time})`) + chalk.green(` → ${selection.room.name}`));
+        });
+      }
+      if (declined && declined.length > 0) {
+        declined.forEach((meetingIndex) => {
+          const meeting = allMeetings[meetingIndex].meeting;
+          const meetingName = meeting.summary || 'Untitled Meeting';
+          const date = new Date(meeting.start.dateTime || meeting.start.date);
+          const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          console.log(chalk.gray('  • ') + chalk.white(meetingName) + chalk.gray(` (${time})`) + chalk.red(' ✗ DECLINE'));
+        });
+      }
+      console.log('');
+
+      const confirmAnswer = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'confirm',
+        message: chalk.yellow('Are you sure you want to make these changes?'),
+        default: true
+      }]);
+
+      if (confirmAnswer.confirm) {
+        confirmed = true;
+        finalSelections = selections;
+        finalDeclined = declined;
+      } else {
+        previousState = { selections, declined };
+        console.clear();
+        showWelcome();
+        console.log(chalk.green(`✓ ${statusMsg}`));
+        console.log('');
+      }
     }
 
     console.log('');
-    const { added, skipped, failed } = await processSelectedMeetings(
-      calendar,
-      meetingsWithoutRooms,
-      selections
-    );
 
-    showSummary(added, skipped, failed);
+    // Process declines first
+    let declineResult = { declined: 0, failed: 0 };
+    if (finalDeclined && finalDeclined.length > 0) {
+      declineResult = await processDeclinedMeetings(
+        calendar,
+        allMeetings.map(e => e.meeting),
+        finalDeclined
+      );
+    }
+
+    // Process room additions
+    let roomResult = { added: 0, skipped: 0, failed: 0 };
+    if (finalSelections && finalSelections.length > 0) {
+      roomResult = await processSelectedMeetings(
+        calendar,
+        allMeetings.map(e => e.meeting),
+        finalSelections
+      );
+    }
+
+    showSummary(roomResult.added, roomResult.skipped, roomResult.failed, declineResult.declined, declineResult.failed);
 
   } catch (error) {
     console.log(chalk.red.bold(`\n✗ Error: ${error.message}\n`));
