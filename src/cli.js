@@ -38,6 +38,21 @@ import {
   formatDateTime,
   getAttendeeCount
 } from './calendar.js';
+import {
+  getNetworkFingerprint,
+  isNetworkIdentifiable,
+  saveOfficeFingerprint,
+  getOfficeFingerprint,
+  isAtOffice,
+  describeNetwork
+} from './presence.js';
+import { autoBook, getAutoBookState } from './auto-book.js';
+import {
+  installDaemon,
+  uninstallDaemon,
+  isDaemonInstalled,
+  getLogPath
+} from './daemon.js';
 import fs from 'fs';
 import os from 'os';
 
@@ -718,6 +733,88 @@ async function roomsCommand() {
 }
 
 // Version
+// Office presence command (learn | status)
+async function officeCommand(action) {
+  if (action === 'learn') {
+    const fp = getNetworkFingerprint();
+    if (!isNetworkIdentifiable(fp)) {
+      console.log(chalk.red('\n✗ Couldn\'t read a network gateway. Connect to your office Wi-Fi and try again.\n'));
+      return;
+    }
+    saveOfficeFingerprint(fp);
+    console.log(chalk.green('\n✓ Office network learned:'));
+    console.log(chalk.gray('  ' + describeNetwork(fp)));
+    console.log(chalk.gray('\nThe daemon will now book rooms automatically when you\'re on this network.'));
+    console.log(chalk.gray('Install it with: ') + chalk.cyan('mtg daemon install') + '\n');
+    return;
+  }
+
+  if (action === 'status') {
+    const current = getNetworkFingerprint();
+    const office = getOfficeFingerprint();
+    const atOffice = isAtOffice();
+    const state = getAutoBookState();
+
+    console.log('');
+    console.log(chalk.bold('Current network: ') + chalk.gray(describeNetwork(current)));
+    if (office) {
+      console.log(chalk.bold('Office network:  ') + chalk.gray(describeNetwork(office)));
+      console.log(chalk.bold('At office now:   ') + (atOffice ? chalk.green('yes') : chalk.yellow('no')));
+    } else {
+      console.log(chalk.yellow('Office network not learned yet. Run ') + chalk.cyan('mtg office learn') + chalk.yellow(' at your desk.'));
+    }
+    console.log(chalk.bold('Daemon:          ') + (isDaemonInstalled() ? chalk.green('installed') : chalk.gray('not installed')));
+    if (state.date) {
+      console.log(chalk.bold('Last auto-book:  ') + chalk.gray(`${state.date} (${state.bookedCount} room${state.bookedCount !== 1 ? 's' : ''})`));
+    }
+    console.log('');
+    return;
+  }
+
+  console.log(chalk.red(`\nUnknown office action: "${action}". Use "learn" or "status".\n`));
+}
+
+// Daemon command (install | uninstall | run | status)
+async function daemonCommand(action) {
+  if (action === 'install') {
+    if (!getOfficeFingerprint()) {
+      console.log(chalk.yellow('\n⚠ No office network learned yet. Run ') + chalk.cyan('mtg office learn') + chalk.yellow(' at your desk first.\n'));
+      return;
+    }
+    const result = installDaemon();
+    console.log((result.success ? chalk.green('\n✓ ') : chalk.red('\n✗ ')) + result.message + '\n');
+    return;
+  }
+
+  if (action === 'uninstall') {
+    const result = uninstallDaemon();
+    console.log((result.success ? chalk.green('\n✓ ') : chalk.yellow('\n⚠ ')) + result.message + '\n');
+    return;
+  }
+
+  if (action === 'status') {
+    console.log('');
+    console.log(chalk.bold('Daemon: ') + (isDaemonInstalled() ? chalk.green('installed') : chalk.gray('not installed')));
+    console.log(chalk.gray('Logs:   ' + getLogPath()));
+    console.log('');
+    return;
+  }
+
+  if (action === 'run') {
+    // Invoked by launchd on a timer. Output goes to the daemon log.
+    const result = await autoBook();
+    const stamp = new Date().toISOString();
+    if (result.status === 'ok') {
+      console.log(`[${stamp}] booked ${result.booked.length}, unavailable ${result.unavailable.length}`);
+    } else {
+      console.log(`[${stamp}] ${result.status}`);
+    }
+    return;
+  }
+
+  console.log(chalk.red(`\nUnknown daemon action: "${action}". Use "install", "uninstall", "status", or "run".\n`));
+}
+
 const packageJson = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url)));
 
 // CLI setup
@@ -761,6 +858,18 @@ program
   .option('--add <value>', 'Add an item (format depends on action)')
   .option('--remove <value>', 'Remove an item')
   .action(configCommand);
+
+// Office presence command
+program
+  .command('office <action>')
+  .description('Manage office presence detection (learn, status)')
+  .action(officeCommand);
+
+// Daemon command
+program
+  .command('daemon <action>')
+  .description('Manage the auto-booking daemon (install, uninstall, status, run)')
+  .action(daemonCommand);
 
 // Parse arguments
 program.parse();
